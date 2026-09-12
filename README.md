@@ -61,7 +61,9 @@ Die Seite ist statisch, ohne Build-Schritt. Der Workflow
 `.github/workflows/pages.yml` veröffentlicht bei jedem Push auf den Standard-Branch -
 unabhängig davon, wie der gerade heißt.
 
-Einmalig in den Repository-Einstellungen: **Settings → Pages → Source: GitHub Actions**.
+Einmalig von Hand nötig, weil der Workflow-Token das nicht selbst darf:
+**Settings → Pages → Build and deployment → Source: GitHub Actions.** Danach den
+Workflow unter *Actions* einmal neu starten oder etwas pushen.
 
 ## Lokal starten
 

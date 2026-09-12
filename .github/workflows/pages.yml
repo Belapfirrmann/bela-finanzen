@@ -24,10 +24,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Setzt voraus, dass Pages einmalig auf die Quelle "GitHub Actions"
+      # gestellt wurde: Settings -> Pages -> Build and deployment -> Source.
+      # Automatisch freischalten darf der Workflow-Token nicht.
       - uses: actions/configure-pages@v5
-        with:
-          # Schaltet GitHub Pages beim ersten Lauf selbst frei.
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .

@@ -269,8 +269,13 @@ export function buildPositions(dataRows, mapping) {
 
     if (value == null && qty == null) { skipped.push(label); continue; }
 
+    const baseKey = isin || wkn || norm(label);
+    // Derselbe Titel kann mehrfach auftauchen (z. B. Teildepots) - Schlüssel eindeutig halten.
+    let key = baseKey, n = 2;
+    while (positions.some((p) => p.key === key)) key = `${baseKey}#${n++}`;
+
     positions.push({
-      key: isin || wkn || norm(label),
+      key,
       name: name || isin || wkn,
       wkn: wkn || null,
       isin: isin || null,
