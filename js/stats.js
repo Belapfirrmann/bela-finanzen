@@ -66,22 +66,6 @@ export function allocationByClass(snap, classOf) {
     .sort((a, b) => b.value - a.value);
 }
 
-/** Streuungsmaße: Klumpenrisiko und effektive Anzahl Positionen. */
-export function concentration(snap) {
-  const rows = allocation(snap);
-  if (!rows.length) return null;
-  const shares = rows.map((r) => r.share / 100);
-  const hhi = shares.reduce((s, x) => s + x * x, 0);
-  return {
-    top1: rows[0].share,
-    top1Name: rows[0].name,
-    top3: rows.slice(0, 3).reduce((s, r) => s + r.share, 0),
-    hhi,
-    effective: hhi > 0 ? 1 / hhi : 0,
-    count: rows.length,
-  };
-}
-
 /**
  * Veränderung zwischen zwei Stichtagen.
  * `flow` des späteren Stichtags ist frisches Geld und wird herausgerechnet,
@@ -118,39 +102,4 @@ export function valueSeries(snapshots, range = 'max') {
   const last = pts[pts.length - 1].date;
   const days = Number(range);
   return pts.filter((p) => daysBetween(p.date, last) <= days);
-}
-
-/** Positionen, die sich zwischen zwei Stichtagen am stärksten bewegt haben. */
-export function movers(prev, curr, limit = 3) {
-  if (!curr) return { up: [], down: [], basis: null };
-  const byKey = new Map((prev?.positions || []).map((p) => [p.key, p]));
-  const rows = curr.positions.map((p) => {
-    const before = byKey.get(p.key);
-    // Positionswert ändert sich auch durch Zukauf - darum über den Kurs vergleichen.
-    const canCompare = before && typeof before.price === 'number' && typeof p.price === 'number' && before.price > 0;
-    const pct = canCompare ? ((p.price - before.price) / before.price) * 100 : null;
-    const abs = canCompare && typeof p.qty === 'number' ? (p.price - before.price) * p.qty : null;
-    return { ...p, changePct: pct, changeAbs: abs, isNew: !before };
-  });
-  const comparable = rows.filter((r) => typeof r.changePct === 'number' && Math.abs(r.changePct) > 0.0001);
-
-  if (comparable.length) {
-    const sorted = [...comparable].sort((a, b) => b.changePct - a.changePct);
-    return {
-      basis: 'change',
-      up: sorted.filter((r) => r.changePct > 0).slice(0, limit),
-      down: sorted.filter((r) => r.changePct < 0).reverse().slice(0, limit),
-      newOnes: rows.filter((r) => r.isNew),
-    };
-  }
-
-  // Kein Vorgänger-Stichtag: dann die größten Gewinner und Verlierer seit Kauf.
-  const rated = curr.positions.filter((p) => typeof p.gainPct === 'number');
-  const sorted = [...rated].sort((a, b) => b.gainPct - a.gainPct);
-  return {
-    basis: 'sinceBuy',
-    up: sorted.filter((p) => p.gainPct > 0).slice(0, limit),
-    down: sorted.filter((p) => p.gainPct < 0).reverse().slice(0, limit),
-    newOnes: [],
-  };
 }

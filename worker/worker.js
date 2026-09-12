@@ -19,6 +19,7 @@ const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (
 
 const QUOTE_TTL = 60;    // Sekunden
 const NEWS_TTL = 900;
+const HISTORY_TTL = 3600;
 const SEARCH_TTL = 86400;
 
 export default {
@@ -32,9 +33,15 @@ export default {
     try {
       switch (url.pathname.replace(/\/+$/, '') || '/') {
         case '/':
-          return json({ ok: true, service: 'bela-finanzen-markt', endpoints: ['/quote', '/news', '/search'] }, cors);
+          return json({ ok: true, service: 'bela-finanzen-markt', endpoints: ['/quote', '/history', '/news', '/search'] }, cors);
         case '/quote':
           return json(await quotes(splitList(url.searchParams.get('symbols'))), cors, 200, QUOTE_TTL);
+        case '/history':
+          return json(await history(
+            splitList(url.searchParams.get('symbols')),
+            url.searchParams.get('range'),
+            url.searchParams.get('interval'),
+          ), cors, 200, HISTORY_TTL);
         case '/news':
           return json(await news(url.searchParams.get('q') || 'Börse', url.searchParams.get('limit')), cors, 200, NEWS_TTL);
         case '/search':
@@ -107,6 +114,7 @@ async function quoteOne(symbol) {
     name: m.longName || m.shortName || null,
     currency: m.currency || null,
     exchange: m.fullExchangeName || m.exchangeName || null,
+    instrumentType: m.instrumentType || null,
     marketState: m.marketState || null,
     price,
     previousClose: prev,
@@ -138,6 +146,52 @@ function thin(arr, max) {
   const out = [];
   for (let i = 0; i < max; i++) out.push(arr[Math.min(arr.length - 1, Math.floor(i * step))]);
   return out;
+}
+
+/* ------------------------------------------------------------ Kurshistorie */
+
+const RANGES = new Set(['5d', '1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'ytd', 'max']);
+const INTERVALS = new Set(['5m', '15m', '1h', '1d', '1wk', '1mo']);
+
+/** Tagesschlusskurse einer Reihe von Symbolen, für den Verlaufschart. */
+async function historyOne(symbol, range, interval) {
+  const api = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`
+            + `?range=${range}&interval=${interval}&includePrePost=false`;
+  const res = await upstream(api, HISTORY_TTL);
+  if (!res.ok) return { symbol, error: `Börse antwortete mit ${res.status}` };
+
+  const data = await res.json();
+  const result = data?.chart?.result?.[0];
+  if (!result) return { symbol, error: data?.chart?.error?.description || 'Keine Historie gefunden.' };
+
+  const stamps = result.timestamp || [];
+  const closes = result.indicators?.quote?.[0]?.close || [];
+  const points = [];
+  for (let i = 0; i < stamps.length; i++) {
+    const c = closes[i];
+    if (typeof c !== 'number' || !Number.isFinite(c)) continue;
+    points.push({ t: stamps[i] * 1000, c });
+  }
+  return {
+    symbol: result.meta?.symbol || symbol,
+    currency: result.meta?.currency || null,
+    instrumentType: result.meta?.instrumentType || null,
+    points,
+  };
+}
+
+async function history(symbols, rangeRaw, intervalRaw) {
+  if (!symbols.length) return { series: [] };
+  const range = RANGES.has(rangeRaw) ? rangeRaw : '6mo';
+  const interval = INTERVALS.has(intervalRaw) ? intervalRaw : '1d';
+  const settled = await Promise.allSettled(symbols.map((s) => historyOne(s, range, interval)));
+  return {
+    fetchedAt: Date.now(),
+    range,
+    interval,
+    series: settled.map((s, i) =>
+      s.status === 'fulfilled' ? s.value : { symbol: symbols[i], error: String(s.reason) }),
+  };
 }
 
 /* ------------------------------------------------------------- Symbolsuche */

@@ -41,11 +41,12 @@ npx wrangler deploy
 | Pfad | Zweck |
 |---|---|
 | `/quote?symbols=SXR8.DE,CRWV` | Kurs, Vortagesschluss, Tagesspanne, Intraday-Punkte |
+| `/history?symbols=SXR8.DE&range=6mo&interval=1d` | Schlusskurse für die Verlaufscharts |
 | `/search?q=Vanguard%20All-World` | Börsensymbol suchen, auch per ISIN |
 | `/news?q=Nasdaq&limit=12` | deutschsprachige Schlagzeilen zum Suchbegriff |
 
 Antworten werden von Cloudflare zwischengespeichert: Kurse 60 Sekunden,
-Nachrichten 15 Minuten. Der kostenlose Tarif erlaubt 100.000 Anfragen am Tag,
+Historie eine Stunde, Nachrichten 15 Minuten. Der kostenlose Tarif erlaubt 100.000 Anfragen am Tag,
 das reicht um ein Vielfaches.
 
 ## Wenn etwas nicht geht

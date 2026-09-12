@@ -5,6 +5,7 @@ import * as store from './store.js';
 
 const QUOTE_TTL = 60_000;
 const NEWS_TTL = 10 * 60_000;
+const HISTORY_TTL = 60 * 60_000;
 
 const mem = new Map();            // url -> { at, data }
 const inflight = new Map();       // url -> Promise
@@ -67,9 +68,23 @@ async function call(path, { ttl = QUOTE_TTL, force = false, base = null, timeout
 /* ---------------------------------------------------------------- Symbole */
 
 export const symbolOf = (key) => store.getState().meta?.[key]?.symbol || null;
+export const kindOf = (key) => store.getState().meta?.[key]?.kind || null;
 
-export function setSymbol(key, symbol) {
-  store.setMeta(key, { symbol: symbol ? symbol.trim().toUpperCase() : null });
+export function setSymbol(key, symbol, kind = undefined) {
+  const patch = { symbol: symbol ? symbol.trim().toUpperCase() : null };
+  if (kind !== undefined) patch.kind = kind || null;
+  store.setMeta(key, patch);
+}
+
+/** Grobe Einteilung aus dem, was die Börse über das Papier sagt. */
+export function kindFrom(raw) {
+  const t = String(raw || '').toUpperCase();
+  if (!t) return null;
+  if (t.includes('ETF') || t.includes('FUND') || t.includes('MUTUALFUND')) return 'ETF';
+  if (t.includes('EQUITY') || t.includes('AKTIE') || t.includes('STOCK')) return 'Aktie';
+  if (t.includes('CURRENCY')) return 'Währung';
+  if (t.includes('CRYPTO')) return 'Krypto';
+  return null;
 }
 
 /** Macht aus comdirects Kurzschreibweise einen brauchbaren Suchbegriff. */
@@ -141,6 +156,116 @@ export async function ping(base) {
   const info = await call('/', { ttl: 0, force: true, base: root, timeout: 9000 });
   if (!info.ok) throw new Error('Unter der Adresse antwortet etwas anderes als der Marktdaten-Worker.');
   return info;
+}
+
+/* ------------------------------------------------------------ Kurshistorie */
+
+/** Schlusskurse zu mehreren Symbolen. */
+export async function history(symbols, { range = '6mo', interval = '1d', force = false } = {}) {
+  const list = [...new Set((symbols || []).filter(Boolean))];
+  if (!list.length || !hasMarket()) return { ok: false, bySymbol: new Map(), error: null };
+  try {
+    const data = await call(
+      `/history?symbols=${encodeURIComponent(list.join(','))}&range=${range}&interval=${interval}`,
+      { ttl: HISTORY_TTL, force, timeout: 20000 },
+    );
+    const bySymbol = new Map();
+    for (const s of data.series || []) bySymbol.set(s.symbol, s);
+    list.forEach((sym, i) => { if (!bySymbol.has(sym) && data.series?.[i]) bySymbol.set(sym, data.series[i]); });
+    return { ok: true, bySymbol, range: data.range, interval: data.interval, error: null };
+  } catch (err) {
+    return { ok: false, bySymbol: new Map(), error: err.message };
+  }
+}
+
+const dayKey = (ms) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+/**
+ * Wertverlauf des Depots aus Kursdaten.
+ *
+ * Gerechnet wird mit den heutigen Stückzahlen. Was du früher gekauft oder
+ * verkauft hast, steckt da nicht drin - die Kurve zeigt, wie sich dein
+ * heutiger Bestand entwickelt hätte, nicht dein tatsächliches Depot.
+ * Deshalb wird sie im UI auch genau so benannt.
+ */
+export async function portfolioHistory(positions, { range = '6mo', interval = '1d', force = false } = {}) {
+  const held = positions.filter((p) => symbolOf(p.key) && Number.isFinite(p.qty));
+  if (!held.length) return { ok: false, points: [], covered: 0, total: positions.length, error: null };
+
+  const symbols = held.map((p) => symbolOf(p.key));
+  const res = await history(symbols, { range, interval, force });
+  if (!res.ok) return { ok: false, points: [], covered: 0, total: positions.length, error: res.error };
+
+  // Fremdwährungen brauchen ihre eigene Kurve, sonst verzerrt der heutige Kurs die Vergangenheit.
+  const currencies = [...new Set(
+    symbols.map((s) => res.bySymbol.get(s)?.currency).filter((c) => c && c !== 'EUR'),
+  )];
+  const fxSeries = new Map();
+  if (currencies.length) {
+    const fxRes = await history(currencies.map((c) => `EUR${c}=X`), { range, interval, force });
+    for (const c of currencies) {
+      const s = fxRes.bySymbol.get(`EUR${c}=X`);
+      if (s && !s.error) fxSeries.set(c, indexByDay(s.points));
+    }
+  }
+
+  const byDay = new Map();          // Symbol -> Map(tag -> Kurs)
+  const usable = [];
+  for (const p of held) {
+    const sym = symbolOf(p.key);
+    const s = res.bySymbol.get(sym);
+    if (!s || s.error || !s.points?.length) continue;
+    const cur = s.currency && s.currency !== 'EUR' ? s.currency : null;
+    if (cur && !fxSeries.has(cur)) continue;      // ohne Wechselkurs lieber weglassen
+    byDay.set(sym, indexByDay(s.points));
+    usable.push({ position: p, symbol: sym, currency: cur });
+  }
+  if (!usable.length) return { ok: false, points: [], covered: 0, total: positions.length, error: null };
+
+  const days = [...new Set(usable.flatMap(({ symbol }) => [...byDay.get(symbol).keys()]))].sort();
+  const last = new Map();
+  const lastFx = new Map();
+  const points = [];
+
+  for (const day of days) {
+    let sum = 0, complete = true;
+    for (const { position, symbol, currency } of usable) {
+      const px = byDay.get(symbol).get(day) ?? last.get(symbol);
+      if (px == null) { complete = false; break; }
+      last.set(symbol, px);
+
+      let factor = 1;
+      if (currency) {
+        const rate = fxSeries.get(currency).get(day) ?? lastFx.get(currency);
+        if (rate == null) { complete = false; break; }
+        lastFx.set(currency, rate);
+        factor = 1 / rate;
+      }
+      sum += px * factor * position.qty;
+    }
+    // Erst ab dem Tag zeichnen, an dem alle Papiere einen Kurs haben.
+    if (complete) points.push({ date: day, value: sum });
+  }
+
+  return { ok: true, points, covered: usable.length, total: positions.length, error: null };
+}
+
+function indexByDay(points) {
+  const m = new Map();
+  for (const p of points || []) m.set(dayKey(p.t), p.c);
+  return m;
+}
+
+/** Intraday-Verlauf einer einzelnen Position, für die Detailcharts. */
+export async function intraday(symbol, { force = false } = {}) {
+  if (!symbol || !hasMarket()) return { ok: false, points: [], error: null };
+  const res = await history([symbol], { range: '5d', interval: '15m', force });
+  const s = res.bySymbol.get(symbol);
+  if (!res.ok || !s || s.error) return { ok: false, points: [], error: s?.error || res.error };
+  return { ok: true, points: s.points, currency: s.currency, error: null };
 }
 
 /* ------------------------------------------------------------ Wechselkurse */
@@ -223,7 +348,7 @@ export async function autoAssign(positions, { onProgress = () => {} } = {}) {
     const best = await pickCandidate(p, cands);
 
     if (best) {
-      setSymbol(p.key, best.symbol);
+      setSymbol(p.key, best.symbol, kindFrom(best.quote?.instrumentType));
       assigned.push({ position: p, ...best });
     } else {
       unsure.push({ position: p, reason: 'kein Kandidat passte zum Kurs aus der CSV', candidates: cands });
@@ -349,7 +474,7 @@ export async function applySecurityList(text, positions, { onProgress = () => {}
 
     const best = await pickCandidate(p, candidates);
     if (best) {
-      setSymbol(p.key, best.symbol);
+      setSymbol(p.key, best.symbol, kindFrom(best.quote?.instrumentType));
       applied.push({ position: p, entry: e, ...best });
     } else {
       unsure.push({ position: p, entry: e, reason: 'kein Treffer passte zum Kurs aus der CSV' });

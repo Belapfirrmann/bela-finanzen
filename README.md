@@ -25,9 +25,9 @@ Committe niemals echte Exporte ins Repository - `.gitignore` blockt `*.csv` bere
 
 | Tab | Inhalt |
 |---|---|
-| **Übersicht** | Depotwert, Gewinn, Wertentwicklung, Aufteilung, Streuung |
-| **Heute** | Kursbewegung seit Börsenschluss gestern, je Position und in Summe |
-| **Aktien** | Kurse und deutschsprachige Schlagzeilen zu deinen Werten |
+| **Übersicht** | Depotwert, heutige Veränderung, Gewinn, Wertentwicklung, Aufteilung |
+| **Heute** | Kursbewegung seit Börsenschluss gestern, je Position mit eigenem Chart |
+| **Aktien** | Einzelaktien mit Chart und Schlagzeilen; ETFs bleiben außen vor |
 | **Positionen** | alle Wertpapiere, sortierbar, mit Detailblatt |
 | **Mehr** | Import, Darstellung, Marktdaten, Stichtage, Sicherung |
 
@@ -39,12 +39,13 @@ der Einstellung des Handys. Der Mond oben rechts schaltet schnell durch.
 * **Depotwert** mit Veränderung seit dem letzten Stichtag, wahlweise um Ein- und
   Auszahlungen bereinigt, damit frisches Geld nicht als Rendite durchgeht.
 * **Gewinn und Verlust** gesamt und je Position, absolut und in Prozent.
-* **Wertentwicklung über die Zeit.** Jeder Import legt einen Stichtag an. Je öfter du
-  importierst, desto feiner die Kurve - genau das, was die comdirect nicht aufbewahrt.
+* **Wertentwicklung über die Zeit.** Mit angebundenen Marktdaten wird die Kurve aus
+  echten Kursen gezeichnet und ist ab dem ersten Import da; sie rechnet mit deinen
+  heutigen Stückzahlen, frühere Käufe stecken also nicht darin. Ohne Anbindung
+  entsteht sie aus den Stichtagen und braucht darum zwei Importe.
 * **Aufteilung** nach Position und nach selbst vergebener Anlageklasse.
-* **Stärkste Bewegungen** seit dem letzten Stichtag, auf Kursbasis gerechnet, damit
-  Zukäufe nicht als Kursgewinn erscheinen.
-* **Streuung**: größte Position, Top 3, effektive Anzahl Positionen (Klumpenrisiko).
+* **Charts überall**: in „Heute" je Position mit wählbarem Zeitraum, in „Aktien" und
+  im Detailblatt über sechs Monate. Alle lassen sich mit dem Finger abfahren.
 
 Jede Auswertung gibt es zusätzlich als Tabelle, damit die Zahlen auch ohne Farben
 lesbar sind.
@@ -55,10 +56,13 @@ Optional. Ohne sie läuft alles andere unverändert weiter.
 
 Eine Webseite darf Börsendaten nicht direkt abfragen, darum liegt im Ordner
 `worker/` ein kleines Zwischenstück für Cloudflare Workers. Es braucht **keinen
-API-Schlüssel**, speichert nichts und holt Kurse von Yahoo Finance sowie
-Schlagzeilen von Google News. Einrichtung und Fehlersuche stehen in
-[`worker/README.md`](worker/README.md); die Adresse trägst du danach unter
-**Mehr → Marktdaten** ein.
+API-Schlüssel**, speichert nichts und holt Kurse, Kurshistorie und Schlagzeilen
+von Yahoo Finance und Google News.
+
+Die Einrichtung steht Schritt für Schritt **in der App** unter
+**Mehr → Marktdaten → Anleitung**, samt Knopf, der den Worker-Code in die
+Zwischenablage legt. Ausführlicher, mit Fehlersuche, in
+[`worker/README.md`](worker/README.md).
 
 ### Wie ein Wertpapier zu seinem Kurs kommt
 

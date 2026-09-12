@@ -4,10 +4,10 @@
 import * as store from './store.js';
 import * as market from './market.js';
 import * as stats from './stats.js';
-import { sparkline } from './charts.js';
+import { sparkline, lineChart, responsive } from './charts.js';
 import {
   money, moneySigned, pct, price as fmtPrice, qty as fmtQty,
-  deltaHtml, direction, escapeHtml, relTime, clock, dateFull, isNum,
+  deltaHtml, direction, escapeHtml, relTime, clock, dateFull, dateShort, isNum,
 } from './format.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -39,6 +39,19 @@ const noMarketCard = (what) => `
 
 /* ==================================================================== HEUTE */
 
+const TODAY_RANGES = [
+  { key: '1d', range: '1d', interval: '5m', label: 'Heute' },
+  { key: '5d', range: '5d', interval: '15m', label: '5 Tage' },
+  { key: '1mo', range: '1mo', interval: '1d', label: '1 M' },
+  { key: '6mo', range: '6mo', interval: '1d', label: '6 M' },
+];
+let todayRange = '5d';
+
+export function setTodayRange(key) {
+  todayRange = key;
+  renderToday();
+}
+
 export async function renderToday() {
   const body = $('#today-body');
   const snap = store.latestSnapshot();
@@ -56,11 +69,15 @@ export async function renderToday() {
 
   body.innerHTML = `<section class="card glass"><div class="stack">
       <div class="skeleton" style="height:64px"></div>
-      <div class="skeleton" style="height:120px"></div>
+      <div class="skeleton" style="height:200px"></div>
     </div></section>`;
 
   const symbols = rows.map((p) => market.symbolOf(p.key)).filter(Boolean);
-  const res = await market.quotes(symbols);
+  const spec = TODAY_RANGES.find((r) => r.key === todayRange) || TODAY_RANGES[1];
+  const [res, hist] = await Promise.all([
+    market.quotes(symbols),
+    symbols.length ? market.history(symbols, { range: spec.range, interval: spec.interval }) : Promise.resolve({ bySymbol: new Map() }),
+  ]);
 
   if (res.error) {
     body.innerHTML = `<section class="card glass">
@@ -80,7 +97,6 @@ export async function renderToday() {
   const withSymbol = rows.filter((p) => market.symbolOf(p.key));
   const without = rows.filter((p) => !market.symbolOf(p.key));
 
-  // Abweichungen vorab bestimmen, damit die Zeilen synchron gebaut werden können.
   const mismatches = new Map();
   await Promise.all(withSymbol.map(async (p) => {
     const m = await market.priceMismatch(p, res.bySymbol.get(market.symbolOf(p.key)));
@@ -94,24 +110,27 @@ export async function renderToday() {
         <p class="hero__value">${escapeHtml(moneySigned(t.change))}</p>
         <p class="hero__delta">
           ${deltaHtml(t.pct, pct(t.pct, { signed: true }))}
-          <span class="hero__deltalabel">${t.complete
-            ? 'alle Positionen erfasst'
-            : `${t.covered} von ${t.total} Positionen erfasst`}</span>
+          <span class="hero__deltalabel">${t.complete ? 'alle Positionen erfasst' : `${t.covered} von ${t.total} Positionen erfasst`}</span>
         </p>
       </section>` : `
       <section class="card glass"><p class="card__note">Noch keinem Wertpapier ist ein Börsensymbol zugeordnet. Tippe unten auf eine Position, um das nachzuholen.</p></section>`}
 
-    ${withSymbol.length ? `<section class="card glass">
-      <div class="card__head"><h2 class="card__title">Deine Werte</h2></div>
-      <div class="rows">${withSymbol.map((p) => quoteRow(p, res.bySymbol.get(market.symbolOf(p.key)), mismatches.get(p.key))).join('')}</div>
-    </section>` : ''}
+    ${withSymbol.length ? `
+      <div class="seg seg--wide" role="group" aria-label="Zeitraum der Charts" id="today-range">
+        ${TODAY_RANGES.map((r) => `<button type="button" class="seg__btn${r.key === todayRange ? ' is-active' : ''}" data-todayrange="${r.key}">${r.label}</button>`).join('')}
+      </div>
+      <section class="card glass">
+        <div class="card__head"><h2 class="card__title">Deine Werte</h2></div>
+        ${withSymbol.map((p) => posChartBlock(p, res.bySymbol.get(market.symbolOf(p.key)), mismatches.get(p.key))).join('')}
+        <p class="card__note">Fahr mit dem Finger über einen Chart, dann wandert der Punkt mit und zeigt Zeitpunkt und Kurs.</p>
+      </section>` : ''}
 
     ${without.length ? `<section class="card glass">
       <div class="card__head">
         <h2 class="card__title">Ohne Börsensymbol</h2>
         <button class="btn btn--sm btn--primary" type="button" data-autoassign="1">Automatisch zuordnen</button>
       </div>
-      <p class="card__note">Diese Positionen fehlen in der Tagesrechnung. „Automatisch zuordnen“ sucht sie selbst und prüft jeden Treffer gegen den Kurs aus deiner CSV. Du kannst auch einzeln antippen.</p>
+      <p class="card__note">Diese Positionen fehlen in der Tagesrechnung. „Automatisch zuordnen" sucht sie selbst und prüft jeden Treffer gegen den Kurs aus deiner CSV. Du kannst auch einzeln antippen.</p>
       <div class="rows">${without.map((p) => `
         <button type="button" class="row" data-symbolfor="${escapeHtml(p.key)}">
           <span class="row__main">
@@ -123,33 +142,64 @@ export async function renderToday() {
     </section>` : ''}
 
     ${tableHtml(withSymbol, res.bySymbol)}`;
+
+  // Charts nachziehen, wenn das Gerüst steht.
+  for (const p of withSymbol) {
+    const sym = market.symbolOf(p.key);
+    const box = body.querySelector(`[data-chartfor="${cssEscape(p.key)}"]`);
+    const series = hist.bySymbol?.get(sym);
+    if (!box) continue;
+    if (!series || series.error || !series.points?.length) {
+      box.innerHTML = `<p class="card__note">${escapeHtml(series?.error || 'Für diesen Zeitraum liegen keine Kurse vor.')}</p>`;
+      continue;
+    }
+    const pts = series.points.map((x) => ({ t: x.t, value: x.c }));
+    // Über mehrere Tage sagt eine Uhrzeit an der Achse nichts.
+    const spanMs = pts[pts.length - 1].t - pts[0].t;
+    const sameDay = spanMs < 36 * 3600 * 1000;
+    responsive(box, () => lineChart(box, pts, {
+      height: 156,
+      formatY: (v) => fmtPrice(v),
+      formatTip: (v) => fmtPrice(v),
+      formatX: (q) => (sameDay ? clock(q.t) : dateShort(dayOfMs(q.t))),
+      formatTipX: (q) => (spanMs < 8 * 86400000
+        ? `${dateShort(dayOfMs(q.t))} · ${clock(q.t)} Uhr`
+        : dateFull(dayOfMs(q.t))),
+      minSpanPct: 0.004,
+    }));
+  }
 }
 
-function quoteRow(p, q, mismatch = null) {
+const dayOfMs = (ms) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const cssEscape = (v) => (window.CSS?.escape ? window.CSS.escape(v) : String(v).replace(/["\\]/g, '\\$&'));
+
+/** Ein Wertpapier mit Kopfzeile, Chart und Tagesspanne. */
+function posChartBlock(p, q, mismatch) {
   const sym = market.symbolOf(p.key);
-  if (!q || q.error) {
-    return `<button type="button" class="row" data-symbolfor="${escapeHtml(p.key)}">
-      <span class="row__main">
-        <span class="row__name">${escapeHtml(p.name)}</span>
-        <span class="row__meta">${escapeHtml(sym || '')} · ${escapeHtml(q?.error || 'kein Kurs')}</span>
-      </span>
-      <span class="row__side"><span class="chip">prüfen</span></span>
-    </button>`;
-  }
-  const posChange = isNum(q.change) && isNum(p.qty) ? q.change * p.qty : null;
-  return `<button type="button" class="row" data-poskey="${escapeHtml(p.key)}">
-    <span class="row__main">
-      <span class="row__name">${escapeHtml(p.name)}</span>
-      <span class="row__meta">${escapeHtml(sym)}${q.currency && q.currency !== 'EUR' ? ` · ${escapeHtml(q.currency)}` : ''}${
-        isNum(posChange) ? ` · ${escapeHtml(moneySigned(posChange))} heute` : ''}${
-        mismatch ? ' · Symbol prüfen' : ''}</span>
-    </span>
-    ${sparkline(q.spark)}
-    <span class="row__side">
-      <span class="row__value">${escapeHtml(fmtPrice(q.price))}</span>
-      ${pillHtml(q.changePct, pct(q.changePct, { signed: true }))}
-    </span>
-  </button>`;
+  const posChange = q && !q.error && isNum(q.change) && isNum(p.qty) ? q.change * p.qty : null;
+  return `<div class="poschart">
+    <div class="poschart__head">
+      <div style="min-width:0">
+        <button type="button" class="poschart__name" data-poskey="${escapeHtml(p.key)}"
+                style="background:none;border:0;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit;font-weight:610">
+          ${escapeHtml(p.name)}
+        </button>
+        <div class="poschart__meta">${escapeHtml(sym || '')}${
+          isNum(posChange) ? ` · ${escapeHtml(moneySigned(posChange))} heute` : ''}${
+          mismatch ? ' · Symbol prüfen' : ''}</div>
+      </div>
+      <div class="poschart__side">
+        <span class="poschart__price">${escapeHtml(q && !q.error ? fmtPrice(q.price) : '–')}</span>
+        ${q && !q.error ? pillHtml(q.changePct, pct(q.changePct, { signed: true })) : '<span class="chip">kein Kurs</span>'}
+      </div>
+    </div>
+    <div class="chart" data-chartfor="${escapeHtml(p.key)}"><div class="skeleton" style="height:156px"></div></div>
+    ${q && !q.error ? rangeHtml(q.dayLow, q.dayHigh, q.price) : ''}
+  </div>`;
 }
 
 function tableHtml(rows, bySymbol) {
@@ -179,103 +229,155 @@ function tableHtml(rows, bySymbol) {
 function csvDayHtml(snap, rows) {
   const withRange = rows.filter((p) => isNum(p.high) && isNum(p.low));
   if (!withRange.length) {
-    return `<section class="card glass"><p class="card__note">Dein letzter Export enthält keine Tagesspanne, darum lässt sich hier ohne Anbindung nichts zeigen.</p></section>`;
+    return '<section class="card glass"><p class="card__note">Dein letzter Export enthält keine Tagesspanne, darum lässt sich hier ohne Anbindung nichts zeigen.</p></section>';
   }
   const swing = withRange.reduce((s, p) => s + (p.high - p.low) * (p.qty || 0), 0);
   return `
     <section class="card glass">
       <div class="card__head"><h2 class="card__title">Tagesspanne laut Export</h2></div>
-      <p class="card__note">Stand ${escapeHtml(dateFull(snap.date))}. Zwischen dem Tagestief und dem Tageshoch aller Positionen liegen ${escapeHtml(money(swing))} Depotwert. Das ist die Schwankungsbreite dieses Börsentages, keine Veränderung gegenüber gestern.</p>
-      <div class="rows">${withRange.map((p) => `
-        <button type="button" class="row" data-poskey="${escapeHtml(p.key)}">
-          <span class="row__main">
-            <span class="row__name">${escapeHtml(p.name)}</span>
-            <span class="row__meta">${escapeHtml(fmtQty(p.qty))} Stk. · Spanne ${escapeHtml(money((p.high - p.low) * (p.qty || 0)))}</span>
-            ${rangeHtml(p.low, p.high, p.price)}
-          </span>
-          <span class="row__side"><span class="row__value">${escapeHtml(fmtPrice(p.price))}</span>
-          <span class="row__meta">geschätzt</span></span>
-        </button>`).join('')}</div>
+      <p class="card__note">Stand ${escapeHtml(dateFull(snap.date))}. Zwischen dem Tagestief und dem Tageshoch aller Positionen liegen ${escapeHtml(money(swing))} Depotwert. Das ist die Schwankungsbreite dieses Börsentages, keine Veränderung gegenüber gestern. Charts gibt es hier erst mit der Marktdaten-Anbindung, weil eine CSV nur diesen einen Tag kennt.</p>
+      ${withRange.map((p) => `
+        <div class="poschart">
+          <div class="poschart__head">
+            <div style="min-width:0">
+              <button type="button" class="poschart__name" data-poskey="${escapeHtml(p.key)}"
+                      style="background:none;border:0;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit;font-weight:610">
+                ${escapeHtml(p.name)}
+              </button>
+              <div class="poschart__meta">${escapeHtml(fmtQty(p.qty))} Stk. · Spanne ${escapeHtml(money((p.high - p.low) * (p.qty || 0)))}</div>
+            </div>
+            <div class="poschart__side">
+              <span class="poschart__price">${escapeHtml(fmtPrice(p.price))}</span>
+              <span class="chip">geschätzt</span>
+            </div>
+          </div>
+          ${rangeHtml(p.low, p.high, p.price)}
+        </div>`).join('')}
     </section>`;
 }
 
 /* =================================================================== AKTIEN */
 
-export async function renderStocks() {
+export async function renderStocks(filter = 'equity') {
   const body = $('#stocks-body');
   const snap = store.latestSnapshot();
   if (!snap) {
     body.innerHTML = '<section class="card glass"><p class="card__note">Noch keine Daten. Importiere zuerst deine comdirect-CSV.</p></section>';
     return;
   }
-  const rows = stats.allocation(snap);
+  const all = stats.allocation(snap);
 
   if (!market.hasMarket()) {
-    body.innerHTML = noMarketCard('Ohne Anbindung gibt es hier keine Kurse und keine Schlagzeilen.') + linkListHtml(rows);
+    body.innerHTML = noMarketCard('Ohne Anbindung gibt es hier keine Kurse und keine Schlagzeilen.') + linkListHtml(all);
     return;
   }
 
   body.innerHTML = `
     <section class="card glass" id="stocks-list">
       <div class="card__head"><h2 class="card__title">Deine Werte</h2></div>
-      <div class="skeleton" style="height:180px"></div>
+      <div class="skeleton" style="height:200px"></div>
     </section>
     <section class="card glass" id="stocks-news">
-      <div class="card__head"><h2 class="card__title">Marktnachrichten</h2></div>
-      <div class="skeleton" style="height:150px"></div>
+      <div class="card__head"><h2 class="card__title">Börsennachrichten</h2></div>
+      <div class="skeleton" style="height:180px"></div>
     </section>`;
 
-  const symbols = rows.map((p) => market.symbolOf(p.key)).filter(Boolean);
-  const [res, general] = await Promise.all([
+  const symbols = all.map((p) => market.symbolOf(p.key)).filter(Boolean);
+  const [res, general, hist] = await Promise.all([
     market.quotes(symbols),
-    market.news('Börse Aktienmarkt Dax Nasdaq', { limit: 10 }),
+    market.news('Börse Aktienmarkt Dax Nasdaq', { limit: 12 }),
+    symbols.length ? market.history(symbols, { range: '6mo', interval: '1d' }) : Promise.resolve({ bySymbol: new Map() }),
   ]);
 
-  const list = $('#stocks-list');
+  // ETFs sind Körbe, keine Einzelwerte - für Nachrichten taugen sie wenig.
+  const isEtf = (p) => {
+    const kind = market.kindOf(p.key) || market.kindFrom(res.bySymbol.get(market.symbolOf(p.key))?.instrumentType);
+    return kind === 'ETF';
+  };
+  const rows = filter === 'equity' ? all.filter((p) => !isEtf(p)) : all;
+  const hidden = all.length - rows.length;
   const anyMissing = rows.some((p) => !market.symbolOf(p.key));
+
+  const list = $('#stocks-list');
   list.innerHTML = `
     <div class="card__head">
-      <h2 class="card__title">Deine Werte</h2>
+      <h2 class="card__title">${filter === 'equity' ? 'Deine Aktien' : 'Alles im Depot'}</h2>
       ${anyMissing ? '<button class="btn btn--sm btn--primary" type="button" data-autoassign="1">Automatisch zuordnen</button>' : ''}
     </div>
     ${res.error ? `<div class="note note--bad"><span class="note__icon" aria-hidden="true">!!</span><span>${escapeHtml(res.error)}</span></div>` : ''}
-    <div class="rows">${rows.map((p) => {
+    ${rows.length ? rows.map((p) => {
       const sym = market.symbolOf(p.key);
       const q = sym ? res.bySymbol.get(sym) : null;
       if (!sym) {
-        return `<button type="button" class="row" data-symbolfor="${escapeHtml(p.key)}">
-          <span class="row__main">
-            <span class="row__name">${escapeHtml(p.name)}</span>
-            <span class="row__meta">kein Börsensymbol zugeordnet</span>
-          </span>
-          <span class="row__side"><span class="chip">zuordnen</span></span>
-        </button>`;
+        return `<div class="poschart">
+          <div class="poschart__head">
+            <div style="min-width:0"><div class="poschart__name">${escapeHtml(p.name)}</div>
+            <div class="poschart__meta">kein Börsensymbol zugeordnet</div></div>
+            <div class="poschart__side"><button class="btn btn--sm" type="button" data-symbolfor="${escapeHtml(p.key)}">zuordnen</button></div>
+          </div>
+        </div>`;
       }
-      return `<button type="button" class="row" data-newsfor="${escapeHtml(p.key)}">
-        <span class="row__main">
-          <span class="row__name">${escapeHtml(p.name)}</span>
-          <span class="row__meta">${escapeHtml(sym)}${q && !q.error && q.exchange ? ` · ${escapeHtml(q.exchange)}` : ''}</span>
-        </span>
-        ${q && !q.error ? sparkline(q.spark) : ''}
-        <span class="row__side">
-          <span class="row__value">${escapeHtml(q && !q.error ? fmtPrice(q.price) : '–')}</span>
-          ${q && !q.error ? pillHtml(q.changePct, pct(q.changePct, { signed: true })) : '<span class="chip">kein Kurs</span>'}
-        </span>
-      </button>`;
-    }).join('')}</div>
-    <p class="card__note">Tippe auf einen Wert für die Schlagzeilen dazu.</p>`;
+      return `<div class="poschart">
+        <div class="poschart__head">
+          <div style="min-width:0">
+            <button type="button" class="poschart__name" data-newsfor="${escapeHtml(p.key)}"
+                    style="background:none;border:0;padding:0;text-align:left;cursor:pointer;color:inherit;font:inherit;font-weight:610">
+              ${escapeHtml(p.name)}
+            </button>
+            <div class="poschart__meta">${escapeHtml(sym)}${q && !q.error && q.exchange ? ` · ${escapeHtml(q.exchange)}` : ''}</div>
+          </div>
+          <div class="poschart__side">
+            <span class="poschart__price">${escapeHtml(q && !q.error ? fmtPrice(q.price) : '–')}</span>
+            ${q && !q.error ? pillHtml(q.changePct, pct(q.changePct, { signed: true })) : '<span class="chip">kein Kurs</span>'}
+          </div>
+        </div>
+        <div class="chart" data-chartfor="${escapeHtml(p.key)}"><div class="skeleton" style="height:140px"></div></div>
+        <div class="actions"><button class="btn btn--sm btn--ghost" type="button" data-newsfor="${escapeHtml(p.key)}">Nachrichten dazu</button></div>
+      </div>`;
+    }).join('') : `<p class="card__note">${filter === 'equity'
+        ? 'In deinem Depot liegen nur Fonds und ETFs, keine Einzelaktien. Schalte oben auf „Alles im Depot“, wenn du sie trotzdem sehen willst.'
+        : 'Keine Positionen.'}</p>`}
+    ${hidden > 0 ? `<p class="card__note">${hidden} ${hidden === 1 ? 'ETF wird' : 'ETFs werden'} hier ausgeblendet. Für einen Korb aus hunderten Titeln gibt es keine sinnvollen Einzelnachrichten.</p>` : ''}`;
 
-  $('#stocks-news').innerHTML = `
+  // Sechsmonatscharts nachziehen
+  for (const p of rows) {
+    const sym = market.symbolOf(p.key);
+    const box = list.querySelector(`[data-chartfor="${cssEscape(p.key)}"]`);
+    const series = sym ? hist.bySymbol?.get(sym) : null;
+    if (!box) continue;
+    if (!series || series.error || !series.points?.length) {
+      box.innerHTML = '<p class="card__note">Kein Verlauf verfügbar.</p>';
+      continue;
+    }
+    const pts = series.points.map((x) => ({ t: x.t, value: x.c }));
+    responsive(box, () => lineChart(box, pts, {
+      height: 140,
+      formatY: (v) => fmtPrice(v),
+      formatTip: (v) => fmtPrice(v),
+      formatX: (q) => dateShort(dayOfMs(q.t)),
+      formatTipX: (q) => dateFull(dayOfMs(q.t)),
+      minSpanPct: 0.01,
+    }));
+  }
+
+  paintNews(general);
+}
+
+/** Börsennachrichten, mit Aktualisierung von Hand und automatisch. */
+function paintNews(res) {
+  const box = $('#stocks-news');
+  if (!box) return;
+  box.innerHTML = `
     <div class="card__head">
-      <h2 class="card__title">Marktnachrichten</h2>
+      <h2 class="card__title">Börsennachrichten</h2>
       <button class="btn btn--sm btn--ghost" type="button" id="news-refresh">Aktualisieren</button>
     </div>
-    ${newsListHtml(general)}`;
+    ${newsListHtml(res)}
+    <p class="card__note">Kommt von Google News, deutschsprachig. Wird beim Öffnen der App und dann etwa stündlich neu geholt.</p>`;
   $('#news-refresh')?.addEventListener('click', async () => {
-    const box = $('#stocks-news');
-    box.querySelector('.news, .note')?.replaceWith(Object.assign(document.createElement('div'), { className: 'skeleton', style: 'height:150px' }));
-    const fresh = await market.news('Börse Aktienmarkt Dax Nasdaq', { limit: 10, force: true });
-    box.querySelector('.skeleton')?.outerHTML && (box.querySelector('.skeleton').outerHTML = newsListHtml(fresh));
+    box.querySelector('.news, .note, .card__note')?.remove();
+    const fresh = await market.news('Börse Aktienmarkt Dax Nasdaq', { limit: 12, force: true });
+    paintNews(fresh);
   });
 }
 

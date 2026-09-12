@@ -8,7 +8,7 @@ import * as market from './market.js';
 import { lineChart, donut, foldToTop, responsive, sparkline } from './charts.js';
 import {
   renderToday, renderStocks, renderLiveSummary, openNews, openSymbolPicker,
-  runAutoAssign, runSecurityList, pillHtml, rangeHtml,
+  runAutoAssign, runSecurityList, setTodayRange, pillHtml, rangeHtml,
 } from './views-market.js';
 import {
   money, moneySigned, pct, qty as fmtQty, price as fmtPrice, decimal,
@@ -64,6 +64,7 @@ let range = 'max';
 let allocMode = 'position';
 let posSort = 'value';
 let posQuery = '';
+let stocksFilter = 'equity';
 
 function render() {
   const state = store.getState();
@@ -75,7 +76,7 @@ function render() {
 
   if (currentView === 'overview' && has) { renderOverview(); renderLiveSummary(); }
   if (currentView === 'today') renderToday();
-  if (currentView === 'stocks') renderStocks();
+  if (currentView === 'stocks') renderStocks(stocksFilter);
   if (currentView === 'positions') renderPositions();
   if (currentView === 'history') renderHistory();
   if (currentView === 'more') renderMore();
@@ -92,6 +93,7 @@ function renderOverview() {
   $('#hero-date').textContent = `Stand ${dateFull(curr.date)}`;
   $('#hero-value').textContent = money(t.value, { cents: t.value < 100000 });
 
+  const alloc = stats.allocation(curr);
   const change = stats.changeBetween(prev, curr);
   if (change) {
     const useAdj = change.flow !== 0;
@@ -100,8 +102,10 @@ function renderOverview() {
     $('#hero-delta').outerHTML = deltaHtml(abs, `${moneySigned(abs).replace(/^[+−]/, '')} · ${pct(p, { signed: true })}`, 'id="hero-delta"');
     $('#hero-delta-label').textContent = `seit ${dateShort(prev.date)}${useAdj ? ' (ohne Ein-/Auszahlung)' : ''}`;
   } else {
-    $('#hero-delta').outerHTML = '<span id="hero-delta" class="delta delta--flat">Erster Stichtag</span>';
-    $('#hero-delta-label').textContent = 'Ab dem zweiten Import zeigt sich hier die Veränderung.';
+    // Nur ein Stichtag: dann sagt die heutige Kursbewegung mehr als ein Hinweis.
+    $('#hero-delta').outerHTML = '<span id="hero-delta" class="delta delta--flat">…</span>';
+    $('#hero-delta-label').textContent = '';
+    paintHeroToday(alloc);
   }
 
   $('#tile-invested').textContent = isNum(t.invested) ? money(t.invested) : '–';
@@ -117,19 +121,11 @@ function renderOverview() {
   $('#tile-count').textContent = String(t.count);
   $('#tile-count-sub').textContent = t.rated ? `${t.winners} im Plus · ${t.losers} im Minus` : 'Wertpapiere im Depot';
 
-  const alloc = stats.allocation(curr);
-  const top = alloc[0];
-  $('#tile-top').textContent = top ? pct(top.share) : '–';
-  $('#tile-top-sub').textContent = top ? top.name : '';
+  paintTodayTile(alloc);
 
   // Verlauf
   $$('#range-picker .seg__btn').forEach((b) => b.classList.toggle('is-active', b.dataset.range === range));
-  const series = stats.valueSeries(snaps, range);
-  const chartBox = $('#chart-history');
-  responsive(chartBox, () => lineChart(chartBox, series));
-  $('#history-note').textContent = series.length > 1
-    ? `${series.length} Stichtage · ${dateFull(series[0].date)} bis ${dateFull(series[series.length - 1].date)}`
-    : 'Importiere die CSV regelmäßig, dann entsteht hier ein echter Verlauf.';
+  paintHistoryChart(snaps, alloc);
 
   // Aufteilung
   $$('#alloc-picker .seg__btn').forEach((b) => b.classList.toggle('is-active', b.dataset.alloc === allocMode));
@@ -167,49 +163,119 @@ function renderOverview() {
     $('#alloc-note').textContent += ' Die Aufteilung ist auf wenige Zehntelprozent genau, weil der Export keinen Einzelkurs enthält.';
   }
 
-  // Bewegungen zwischen Stichtagen
-  const mv = stats.movers(prev, curr, 3);
-  const moversBody = $('#movers-body');
-  const useChange = mv.basis === 'change';
-  const mvRow = (p) => {
-    const v = useChange ? p.changePct : p.gainPct;
-    const a = useChange ? p.changeAbs : p.gainAbs;
-    return `<button type="button" class="row" data-poskey="${escapeHtml(p.key)}">
-      <span class="row__main">
-        <span class="row__name">${escapeHtml(p.name)}</span>
-        <span class="row__meta">${escapeHtml(money(p.value))}${isNum(a) ? ` · ${escapeHtml(moneySigned(a))}` : ''}</span>
-      </span>
-      <span class="row__side">${pillHtml(v, pct(v, { signed: true }))}</span>
-    </button>`;
-  };
-  if (!mv.up.length && !mv.down.length) {
-    moversBody.innerHTML = '<p class="card__note">Noch nichts zu vergleichen. Nach dem nächsten Import steht hier, was sich am stärksten bewegt hat.</p>';
-  } else {
-    moversBody.innerHTML = `
-      <p class="card__note">${useChange ? `Kursveränderung seit ${escapeHtml(dateFull(prev.date))}` : 'Entwicklung seit Kauf (erst ein Stichtag vorhanden)'}</p>
-      ${mv.up.length ? `<p class="subhead">${useChange ? 'Gestiegen' : 'Größte Gewinner'}</p><div class="rows">${mv.up.map(mvRow).join('')}</div>` : ''}
-      ${mv.down.length ? `<p class="subhead">${useChange ? 'Gefallen' : 'Größte Verlierer'}</p><div class="rows">${mv.down.map(mvRow).join('')}</div>` : ''}
-      ${mv.newOnes?.length ? `<p class="card__note">Neu im Depot: ${mv.newOnes.map((p) => escapeHtml(p.name)).join(', ')}</p>` : ''}`;
+}
+
+/** Ohne zweiten Stichtag zeigt die Kopfzeile die heutige Bewegung. */
+async function paintHeroToday(alloc) {
+  const label = $('#hero-delta-label');
+  if (!market.hasMarket()) {
+    $('#hero-delta').outerHTML = '<span id="hero-delta" class="delta delta--flat">Erster Stichtag</span>';
+    label.textContent = 'Verbinde die Marktdaten unter „Mehr“, dann steht hier die heutige Veränderung.';
+    return;
+  }
+  const symbols = alloc.map((p) => market.symbolOf(p.key)).filter(Boolean);
+  if (!symbols.length) {
+    $('#hero-delta').outerHTML = '<span id="hero-delta" class="delta delta--flat">Erster Stichtag</span>';
+    label.textContent = 'Ordne deinen Positionen Börsensymbole zu, dann steht hier die heutige Veränderung.';
+    return;
+  }
+  const res = await market.quotes(symbols);
+  const t = market.todayTotals(alloc, res.bySymbol);
+  if (!isNum(t.change) || currentView !== 'overview') {
+    $('#hero-delta').outerHTML = '<span id="hero-delta" class="delta delta--flat">Erster Stichtag</span>';
+    label.textContent = 'Ab dem zweiten Import zeigt sich hier die Veränderung zum Vorstichtag.';
+    return;
+  }
+  $('#hero-delta').outerHTML = deltaHtml(
+    t.change,
+    `${moneySigned(t.change).replace(/^[+\u2212]/, '')} · ${pct(t.pct, { signed: true })}`,
+    'id="hero-delta"',
+  );
+  label.textContent = `heute${t.complete ? '' : ` · ${t.covered} von ${t.total} Positionen`}`;
+}
+
+/** Kachel „Heute": Tagesveränderung aus Live-Kursen, sonst Spanne aus dem Export. */
+async function paintTodayTile(alloc) {
+  const valueEl = $('#tile-today');
+  const subEl = $('#tile-today-sub');
+
+  if (!market.hasMarket()) {
+    const spanned = alloc.filter((p) => isNum(p.high) && isNum(p.low) && isNum(p.qty));
+    if (spanned.length) {
+      const swing = spanned.reduce((sum, p) => sum + (p.high - p.low) * p.qty, 0);
+      valueEl.textContent = money(swing);
+      subEl.textContent = 'Tagesspanne laut Export';
+    } else {
+      valueEl.textContent = '–';
+      subEl.textContent = 'Marktdaten nicht verbunden';
+    }
+    return;
   }
 
-  // Streuung
-  const c = stats.concentration(curr);
-  const riskBody = $('#risk-body');
-  if (!c) { riskBody.innerHTML = ''; return; }
-  const level = c.top1 >= 40 ? 'bad' : c.top1 >= 25 ? 'warn' : 'good';
-  const levelText = {
-    good: 'Gut gestreut, keine Position dominiert das Depot.',
-    warn: `Eine Position macht ${pct(c.top1)} aus. Im Blick behalten.`,
-    bad: `Klumpenrisiko: ${escapeHtml(c.top1Name)} allein macht ${pct(c.top1)} deines Depots aus.`,
-  }[level];
-  riskBody.innerHTML = `
-    <div class="metrics">
-      <div class="metric"><span class="metric__label">Größte Position</span><span class="metric__value">${escapeHtml(pct(c.top1))}</span></div>
-      <div class="metric"><span class="metric__label">Top 3 zusammen</span><span class="metric__value">${escapeHtml(pct(c.top3))}</span></div>
-      <div class="metric"><span class="metric__label">Effektive Positionen</span><span class="metric__value">${escapeHtml(decimal(c.effective))} von ${c.count}</span></div>
-    </div>
-    <div class="note note--${level}"><span class="note__icon" aria-hidden="true">${{ good: '✓', warn: '!', bad: '!!' }[level]}</span><span>${levelText}</span></div>
-    <p class="card__note">„Effektive Positionen“ sagt, auf wie viele gleich große Posten dein Depot hinauslaufen würde. Liegt der Wert deutlich unter der tatsächlichen Anzahl, hängt viel an wenigen Titeln.</p>`;
+  const symbols = alloc.map((p) => market.symbolOf(p.key)).filter(Boolean);
+  if (!symbols.length) {
+    valueEl.textContent = '–';
+    subEl.textContent = 'noch kein Börsensymbol zugeordnet';
+    return;
+  }
+  const res = await market.quotes(symbols);
+  const t = market.todayTotals(alloc, res.bySymbol);
+  if (!isNum(t.change)) {
+    valueEl.textContent = '–';
+    subEl.textContent = res.error || 'kein Kurs verfügbar';
+    return;
+  }
+  valueEl.textContent = moneySigned(t.change);
+  subEl.innerHTML = `${deltaHtml(t.pct, pct(t.pct, { signed: true }))}${
+    t.complete ? '' : ` · ${t.covered}/${t.total} erfasst`}`;
+}
+
+const RANGE_DAYS = { '1mo': 30, '6mo': 180, '1y': 365, max: 'max' };
+
+/**
+ * Der Verlaufschart. Mit Marktdaten wird er aus echten Kursen gezeichnet und
+ * ist ab dem ersten Import da; ohne bleibt die Reihe der Stichtage, die
+ * naturgemäß erst ab dem zweiten Import eine Linie ergibt.
+ */
+async function paintHistoryChart(snaps, alloc) {
+  const box = $('#chart-history');
+  const note = $('#history-note');
+  const snapSeries = stats.valueSeries(snaps, RANGE_DAYS[range] ?? 'max');
+
+  const drawSnaps = () => {
+    if (snapSeries.length > 1) {
+      responsive(box, () => lineChart(box, snapSeries));
+      note.textContent = `${snapSeries.length} Stichtage · ${dateFull(snapSeries[0].date)} bis ${dateFull(snapSeries[snapSeries.length - 1].date)}`;
+    } else {
+      box.innerHTML = '';
+      note.textContent = 'Für eine Linie braucht es zwei Punkte. Verbinde die Marktdaten, dann wird der Verlauf aus echten Kursen gezeichnet, oder importiere die CSV ein zweites Mal.';
+    }
+  };
+
+  if (!market.hasMarket()) { drawSnaps(); return; }
+
+  drawSnaps();
+  if (snapSeries.length < 2) {
+    box.innerHTML = '<div class="skeleton" style="height:180px"></div>';
+    note.textContent = 'Kurse werden geladen …';
+  }
+
+  const res = await market.portfolioHistory(alloc, { range: range === 'max' ? '5y' : range });
+  if (currentView !== 'overview') return;
+
+  if (!res.ok || res.points.length < 2) {
+    drawSnaps();
+    if (res.error) note.textContent = res.error;
+    else if (!res.covered) note.textContent = 'Ordne deinen Positionen Börsensymbole zu, dann entsteht hier der Kursverlauf.';
+    return;
+  }
+
+  responsive(box, () => lineChart(box, res.points));
+  const first = res.points[0], last = res.points[res.points.length - 1];
+  const diff = last.value - first.value;
+  note.innerHTML = `${deltaHtml(diff, `${moneySigned(diff)} · ${pct(first.value ? (diff / first.value) * 100 : null, { signed: true })}`)}
+    <span style="color:var(--text-muted)"> seit ${escapeHtml(dateFull(first.date))}. Gerechnet mit deinen heutigen Stückzahlen und den damaligen Kursen${
+      res.covered < res.total ? `, ${res.covered} von ${res.total} Positionen` : ''}. Frühere Käufe und Verkäufe stecken darin nicht.</span>`;
 }
 
 /* -------------------------------------------------------------- Positionen */
@@ -222,16 +288,19 @@ async function renderPositions() {
     $('#positions-sub').textContent = '';
     return;
   }
-  paintPositions(null);
+  paintPositions(null, null);
   if (!market.hasMarket()) return;
 
   const symbols = curr.positions.map((p) => market.symbolOf(p.key)).filter(Boolean);
   if (!symbols.length) return;
-  const res = await market.quotes(symbols);
-  if (currentView === 'positions' && res.ok) paintPositions(res.bySymbol);
+  const [res, hist] = await Promise.all([
+    market.quotes(symbols),
+    market.history(symbols, { range: '6mo', interval: '1d' }),
+  ]);
+  if (currentView === 'positions' && res.ok) paintPositions(res.bySymbol, hist.bySymbol);
 }
 
-function paintPositions(bySymbol) {
+function paintPositions(bySymbol, histBySymbol) {
   const curr = store.latestSnapshot();
   const body = $('#positions-body');
   const total = stats.totals(curr);
@@ -243,7 +312,11 @@ function paintPositions(bySymbol) {
     return q && !q.error ? q : null;
   };
 
-  let rows = stats.allocation(curr).map((p) => ({ ...p, q: quoteFor(p) }));
+  const histFor = (p) => {
+    const s = histBySymbol?.get(market.symbolOf(p.key));
+    return s && !s.error && s.points?.length > 1 ? s.points.map((x) => x.c) : null;
+  };
+  let rows = stats.allocation(curr).map((p) => ({ ...p, q: quoteFor(p), hist: histFor(p) }));
   if (posQuery) {
     const q = posQuery.toLowerCase();
     rows = rows.filter((p) => [p.name, p.wkn, p.isin, market.symbolOf(p.key)]
@@ -273,7 +346,7 @@ function paintPositions(bySymbol) {
           <span class="row__meta">${escapeHtml(pct(p.share))} des Depots${isNum(p.qty) ? ` · ${escapeHtml(fmtQty(p.qty))} Stk.` : ''}${
             p.q ? ` · ${escapeHtml(fmtPrice(p.q.price))}${p.q.currency && p.q.currency !== 'EUR' ? ` ${escapeHtml(p.q.currency)}` : ''}` : ''}${cls ? ` · ${escapeHtml(cls)}` : ''}</span>
         </span>
-        ${p.q ? sparkline(p.q.spark) : ''}
+        ${p.hist ? sparkline(p.hist, { width: 66, height: 30 }) : (p.q ? sparkline(p.q.spark) : '')}
         <span class="row__side">
           <span class="row__value">${escapeHtml(money(p.value))}</span>
           ${p.q ? pillHtml(p.q.changePct, `${pct(p.q.changePct, { signed: true })} heute`)
@@ -281,7 +354,7 @@ function paintPositions(bySymbol) {
         </span>
       </button>`;
     }).join('')}</div>
-    ${live ? '<p class="card__note">Der Prozentwert rechts ist die Veränderung von heute. Gewinn und Verlust seit Kauf stehen in der Tabelle.</p>' : ''}
+    ${live ? '<p class="card__note">Die Linie zeigt die letzten sechs Monate, der Prozentwert rechts die Veränderung von heute. Gewinn und Verlust seit Kauf stehen in der Tabelle. Tippe eine Position für den großen Chart an.</p>' : ''}
     </section>
     <section class="card glass">
       <div class="card__head"><h2 class="card__title">Tabelle</h2></div>
@@ -504,6 +577,7 @@ async function openPosition(key) {
   $('#pos-dialog-title').textContent = p.name;
   $('#pos-dialog-body').innerHTML = `
     <div id="pos-live">${sym && market.hasMarket() ? '<div class="skeleton" style="height:86px"></div>' : ''}</div>
+    <div class="chart" id="pos-chart">${sym && market.hasMarket() ? '<div class="skeleton" style="height:170px"></div>' : ''}</div>
     <div class="metrics">
       ${[
         ['Wert', money(p.value)],
@@ -575,8 +649,47 @@ async function openPosition(key) {
         </div>
       </div>
       ${rangeHtml(q.dayLow, q.dayHigh, q.price)}
-      ${sparkline(q.spark, { width: 240, height: 46 })}
       ${mismatch ? `<div class="note note--warn"><span class="note__icon" aria-hidden="true">!</span><span>Der Börsenkurs weicht um ${escapeHtml(pct(mismatch))} vom Kurs aus deiner CSV ab. Vermutlich gehört ein anderes Symbol zu dieser Position.</span></div>` : ''}`;
+
+    const chartBox = $('#pos-chart');
+    if (chartBox) {
+      const hist = await market.history([sym], { range: '6mo', interval: '1d' });
+      const series = hist.bySymbol.get(sym);
+      if (!series || series.error || !series.points?.length) {
+        chartBox.innerHTML = '';
+      } else {
+        const pts = series.points.map((x) => ({ t: x.t, value: x.c }));
+        responsive(chartBox, () => lineChart(chartBox, pts, {
+          height: 170,
+          formatY: (v) => fmtPrice(v),
+          formatTip: (v) => fmtPrice(v),
+          formatX: (o) => dateShort(isoDay(o.t)),
+          formatTipX: (o) => dateFull(isoDay(o.t)),
+          minSpanPct: 0.01,
+        }));
+      }
+    }
+  }
+}
+
+const isoDay = (ms) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+/** Zwischenablage, mit Rückfall für Browser ohne Clipboard-API. */
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
   }
 }
 
@@ -621,6 +734,9 @@ function wireEvents() {
     if (nav) { goto(nav.dataset.goto); return; }
 
     if (e.target.closest('[data-autoassign]')) { runAutoAssign(); return; }
+
+    const tr = e.target.closest('[data-todayrange]');
+    if (tr) { setTodayRange(tr.dataset.todayrange); return; }
 
     const symBtn = e.target.closest('[data-symbolfor]');
     if (symBtn) { document.getElementById('pos-dialog')?.close(); openSymbolPicker(symBtn.dataset.symbolfor); return; }
@@ -684,6 +800,29 @@ function wireEvents() {
       paintMarketStatus('err');
       $('#market-hint').innerHTML = `<div class="note note--bad"><span class="note__icon" aria-hidden="true">!!</span><span>${escapeHtml(err.message)}</span></div>`;
     }
+  });
+
+  $('#btn-copy-worker').addEventListener('click', async () => {
+    try {
+      const res = await fetch('./worker/worker.js');
+      if (!res.ok) throw new Error();
+      await copyText(await res.text());
+      toast('Worker-Code kopiert. Jetzt bei Cloudflare einfügen.');
+    } catch {
+      toast('Code ließ sich nicht kopieren. Er steht im Repository unter worker/worker.js.');
+    }
+  });
+  $('#btn-copy-origin').addEventListener('click', async () => {
+    await copyText(window.location.origin);
+    toast(`${window.location.origin} kopiert.`);
+  });
+
+  $('#stocks-filter').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-stocks]');
+    if (!b) return;
+    stocksFilter = b.dataset.stocks;
+    store.setSetting('stocksFilter', stocksFilter);
+    renderStocks(stocksFilter);
   });
 
   $('#btn-seclist').addEventListener('click', () => {
@@ -761,9 +900,22 @@ function wireEvents() {
 function init() {
   const state = store.load();
   applyTheme(state.settings.theme || 'auto');
-  range = state.settings.range || 'max';
+  range = RANGE_DAYS[state.settings.range] !== undefined ? state.settings.range : '6mo';
+  stocksFilter = state.settings.stocksFilter || 'equity';
+  $$('#stocks-filter .seg__btn').forEach((b) => b.classList.toggle('is-active', b.dataset.stocks === stocksFilter));
   wireEvents();
   goto('overview');
+
+  // Nachrichten altern schnell: stündlich und beim Zurückkehren neu holen.
+  setInterval(() => {
+    if (document.hidden || !market.hasMarket()) return;
+    market.news('Börse Aktienmarkt Dax Nasdaq', { limit: 12, force: true })
+      .then(() => { if (currentView === 'stocks') render(); })
+      .catch(() => {});
+  }, 60 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && (currentView === 'stocks' || currentView === 'today')) render();
+  });
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

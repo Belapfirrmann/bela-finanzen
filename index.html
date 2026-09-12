@@ -82,9 +82,9 @@
           <p class="tile__sub" id="tile-count-sub"></p>
         </article>
         <article class="tile glass">
-          <p class="tile__label">Größte Position</p>
-          <p class="tile__value" id="tile-top">–</p>
-          <p class="tile__sub" id="tile-top-sub"></p>
+          <p class="tile__label">Heute</p>
+          <p class="tile__value" id="tile-today">–</p>
+          <p class="tile__sub" id="tile-today-sub"></p>
         </article>
       </section>
 
@@ -92,9 +92,10 @@
         <div class="card__head">
           <h2 class="card__title" id="h-history">Wertentwicklung</h2>
           <div class="seg" role="group" aria-label="Zeitraum" id="range-picker">
-            <button type="button" class="seg__btn" data-range="90">3M</button>
-            <button type="button" class="seg__btn" data-range="365">1J</button>
-            <button type="button" class="seg__btn is-active" data-range="max">Max</button>
+            <button type="button" class="seg__btn" data-range="1mo">1M</button>
+            <button type="button" class="seg__btn is-active" data-range="6mo">6M</button>
+            <button type="button" class="seg__btn" data-range="1y">1J</button>
+            <button type="button" class="seg__btn" data-range="max">Max</button>
           </div>
         </div>
         <div class="chart" id="chart-history"></div>
@@ -116,15 +117,7 @@
         <p class="card__note" id="alloc-note"></p>
       </section>
 
-      <section class="card glass" aria-labelledby="h-movers">
-        <div class="card__head"><h2 class="card__title" id="h-movers">Stärkste Bewegungen</h2></div>
-        <div id="movers-body"></div>
-      </section>
 
-      <section class="card glass" aria-labelledby="h-risk">
-        <div class="card__head"><h2 class="card__title" id="h-risk">Streuung</h2></div>
-        <div id="risk-body"></div>
-      </section>
 
     </div>
   </section>
@@ -143,6 +136,10 @@
     <div class="viewhead">
       <h1 class="viewhead__title">Aktien</h1>
       <p class="viewhead__sub">Kurse und Schlagzeilen zu deinen Werten.</p>
+    </div>
+    <div class="seg seg--wide" role="group" aria-label="Auswahl" id="stocks-filter">
+      <button type="button" class="seg__btn is-active" data-stocks="equity">Nur Aktien</button>
+      <button type="button" class="seg__btn" data-stocks="all">Alles im Depot</button>
     </div>
     <div id="stocks-body"></div>
   </section>
@@ -247,7 +244,22 @@
         <h2 class="card__title" id="h-market">Marktdaten</h2>
         <span class="pill pill--flat" id="market-status">nicht verbunden</span>
       </div>
-      <p class="card__note">Für Live-Kurse und Nachrichten braucht die App ein kleines Zwischenstück, weil eine reine Webseite die Börsendaten nicht direkt abfragen darf. Die Anleitung steht im Ordner <code>worker/</code> im Repository.</p>
+      <p class="card__note">Für Live-Kurse und Nachrichten braucht die App ein kleines Zwischenstück, weil eine reine Webseite die Börsendaten nicht direkt abfragen darf. Kein API-Schlüssel nötig, nur ein kostenloser Cloudflare-Account.</p>
+      <details class="details" id="worker-guide">
+        <summary>Anleitung: in zehn Minuten eingerichtet</summary>
+        <ol class="steps">
+          <li>Auf <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener noreferrer">dash.cloudflare.com</a> kostenlos anmelden.</li>
+          <li>Links auf <strong>Compute (Workers)</strong>, dann <strong>Create</strong> und <strong>Start with Hello World!</strong> wählen, unten <strong>Deploy</strong> drücken.</li>
+          <li>Oben auf <strong>Edit code</strong>. Den gesamten Beispielcode markieren und löschen.</li>
+          <li>Hier auf <strong>Worker-Code kopieren</strong> tippen und im Cloudflare-Editor einfügen. Dann <strong>Deploy</strong>.</li>
+          <li>Zurück auf der Worker-Seite unter <strong>Settings → Variables and Secrets → Add</strong> die Variable <code>ALLOWED_ORIGINS</code> anlegen, Wert: die Adresse, unter der du diese App öffnest.</li>
+          <li>Die Adresse des Workers (endet auf <code>.workers.dev</code>) unten eintragen und auf <strong>Prüfen</strong> tippen.</li>
+        </ol>
+        <div class="actions">
+          <button class="btn" type="button" id="btn-copy-worker">Worker-Code kopieren</button>
+          <button class="btn btn--ghost" type="button" id="btn-copy-origin">Adresse dieser App kopieren</button>
+        </div>
+      </details>
       <label class="field field--block">
         <span class="field__label">Adresse des Workers</span>
         <div class="field__row">

@@ -9,7 +9,7 @@ const emptyState = () => ({
   version: 1,
   snapshots: [],           // [{ date, importedAt, flow, positions: [...] }]
   meta: {},                // key -> { assetClass }
-  settings: { theme: 'auto', range: 'max', workerUrl: '' },
+  settings: { theme: 'auto', range: '6mo', workerUrl: '', stocksFilter: 'equity' },
 });
 
 let state = emptyState();

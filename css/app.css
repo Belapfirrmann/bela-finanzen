@@ -246,17 +246,17 @@ a { color: var(--accent); }
 /* ----------------------------------------------------------- Layout */
 #main {
   max-width: var(--maxw); margin: 0 auto;
-  padding: 16px 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 36px);
+  padding: 20px 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 48px);
 }
-.view { display: flex; flex-direction: column; gap: 14px; }
+.view { display: flex; flex-direction: column; gap: 22px; }
 [hidden] { display: none !important; }
 
-.viewhead { display: flex; flex-direction: column; gap: 3px; padding: 2px 2px 0; }
+.viewhead { display: flex; flex-direction: column; gap: 4px; padding: 4px 2px 0; }
 .viewhead__title { font-size: 26px; font-weight: 700; letter-spacing: -.03em; }
 .viewhead__sub { font-size: 13px; color: var(--text-secondary); }
 
 /* ------------------------------------------------------------- Hero */
-.hero { display: flex; flex-direction: column; gap: 3px; padding: 8px 2px 2px; }
+.hero { display: flex; flex-direction: column; gap: 4px; padding: 10px 2px 6px; }
 .hero__label {
   font-size: 13px; color: var(--text-secondary);
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
@@ -289,10 +289,10 @@ a { color: var(--accent); }
 .pill--flat { color: var(--text-muted); background: var(--surface-sunk); border-color: var(--border); }
 
 /* ---------------------------------------------------------- Kacheln */
-.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .tile {
-  border-radius: var(--r-md); padding: 13px 14px;
-  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+  border-radius: var(--r-md); padding: 15px 16px;
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
 }
 .tile__label { font-size: 12px; color: var(--text-secondary); }
 .tile__value { font-size: 19px; font-weight: 660; letter-spacing: -.025em; overflow-wrap: anywhere; }
@@ -300,8 +300,8 @@ a { color: var(--accent); }
 
 /* ----------------------------------------------------------- Karten */
 .card {
-  border-radius: var(--r-xl); padding: 15px 15px 16px;
-  display: flex; flex-direction: column; gap: 12px;
+  border-radius: var(--r-xl); padding: 18px 17px 19px;
+  display: flex; flex-direction: column; gap: 15px;
 }
 .card__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .card__title { font-size: 15px; font-weight: 650; letter-spacing: -.015em; }
@@ -326,7 +326,7 @@ a { color: var(--accent); }
 
 /* --------------------------------------------------------- Diagramm */
 .chart { position: relative; width: 100%; }
-.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: none; cursor: crosshair; }
 .chart__grid { stroke: var(--grid); stroke-width: 1; }
 .chart__axis { stroke: var(--axis); stroke-width: 1; }
 .chart__tick { fill: var(--text-muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
@@ -353,7 +353,7 @@ a { color: var(--accent); }
 .spark--flat path { stroke: var(--text-muted); }
 
 /* --------------------------------------------------- Balken (Anteil) */
-.bars { display: flex; flex-direction: column; gap: 11px; }
+.bars { display: flex; flex-direction: column; gap: 15px; }
 .bar { display: flex; flex-direction: column; gap: 5px; width: 100%; text-align: left;
        background: none; border: 0; padding: 4px 0; cursor: pointer; border-radius: var(--r-sm); }
 .bar:hover .bar__name { color: var(--text-primary); }
@@ -393,9 +393,9 @@ a { color: var(--accent); }
 /* ------------------------------------------------------------ Zeilen */
 .rows { display: flex; flex-direction: column; }
 .row {
-  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
-  padding: 11px 4px; background: none; border: 0; border-top: 1px solid var(--border);
-  cursor: pointer; min-height: 58px; border-radius: 12px;
+  display: flex; align-items: center; gap: 13px; width: 100%; text-align: left;
+  padding: 14px 6px; background: none; border: 0; border-top: 1px solid var(--border);
+  cursor: pointer; min-height: 62px; border-radius: 12px;
   transition: background .15s;
 }
 .rows > .row:first-child { border-top: 0; }
@@ -421,7 +421,7 @@ a { color: var(--accent); }
            color: var(--text-muted); padding-top: 6px; }
 
 /* ---------------------------------------------------------- Metriken */
-.metrics { display: flex; flex-direction: column; gap: 10px; }
+.metrics { display: flex; flex-direction: column; gap: 13px; }
 .metric { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .metric__label { font-size: 13px; color: var(--text-secondary); }
 .metric__value { font-size: 14px; font-weight: 620; font-variant-numeric: tabular-nums; text-align: right; }
@@ -515,6 +515,23 @@ select { appearance: none; padding-right: 30px;
 .note__icon { flex: none; font-weight: 700; }
 
 .mapgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+
+/* -------------------------------------------------------------- Anleitung */
+.steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 9px;
+         font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+.steps li::marker { color: var(--text-muted); font-weight: 640; }
+.steps strong { color: var(--text-primary); font-weight: 620; }
+.steps code { background: var(--surface-sunk); padding: 1px 5px; border-radius: 5px; font-size: .92em; }
+
+/* ------------------------------------------- Einzelchart je Wertpapier */
+.poschart { display: flex; flex-direction: column; gap: 11px; padding: 4px 0 2px; }
+.poschart__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.poschart__name { font-size: 14.5px; font-weight: 610; letter-spacing: -.01em;
+                  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.poschart__meta { font-size: 11.5px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.poschart__side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.poschart__price { font-size: 16px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.poschart + .poschart { border-top: 1px solid var(--border); padding-top: 18px; margin-top: 6px; }
 
 /* ------------------------------------------------------------ Leer */
 .empty {
