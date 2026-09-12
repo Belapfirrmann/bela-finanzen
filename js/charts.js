@@ -219,3 +219,25 @@ export function responsive(container, draw) {
   ro.observe(container);
   container.__ro = ro;
 }
+
+/* ------------------------------------------------------------- Sparkline */
+
+/**
+ * Winzige Kurslinie für Zeilen. Die Farbe folgt der Richtung und steht nie
+ * allein - daneben stehen immer Vorzeichen und Prozentwert.
+ */
+export function sparkline(values, { width = 60, height = 26 } = {}) {
+  const pts = (values || []).filter((v) => typeof v === 'number' && Number.isFinite(v));
+  if (pts.length < 2) return '';
+
+  const min = Math.min(...pts), max = Math.max(...pts);
+  const span = max - min || 1;
+  const pad = 2.5;
+  const stepX = (width - pad * 2) / (pts.length - 1);
+  const d = pts
+    .map((v, i) => `${i ? 'L' : 'M'}${(pad + i * stepX).toFixed(1)} ${(pad + (height - pad * 2) * (1 - (v - min) / span)).toFixed(1)}`)
+    .join(' ');
+
+  const dir = pts[pts.length - 1] > pts[0] ? 'up' : pts[pts.length - 1] < pts[0] ? 'down' : 'flat';
+  return `<svg class="spark spark--${dir}" viewBox="0 0 ${width} ${height}" style="width:${width}px;height:${height}px" aria-hidden="true"><path d="${d}"/></svg>`;
+}

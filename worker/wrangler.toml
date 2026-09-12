@@ -1,0 +1,7 @@
+name = "bela-finanzen-markt"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+# Kommagetrennt. Nur diese Seiten dürfen den Worker benutzen.
+ALLOWED_ORIGINS = "https://belapfirrmann.github.io,http://localhost:8099,http://127.0.0.1:8099"

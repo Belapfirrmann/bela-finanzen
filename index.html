@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Bela Finanzen</title>
 <meta name="description" content="Privates Depot-Dashboard. Daten bleiben auf dem Gerät.">
-<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
-<meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#07070a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#eef0f4" media="(prefers-color-scheme: light)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Bela Finanzen">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -23,24 +23,29 @@
       <span class="brand__mark" aria-hidden="true"></span>
       <span class="brand__name">Bela Finanzen</span>
     </div>
-    <button class="iconbtn" id="btn-theme" type="button" aria-label="Design wechseln" title="Hell / Dunkel">
-      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5A6.8 6.8 0 0 1 12 3.5Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
-    </button>
+    <div class="appbar__tools">
+      <button class="iconbtn" id="btn-refresh" type="button" aria-label="Kurse neu laden" title="Kurse neu laden" hidden>
+        <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.5-5.8M20 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="iconbtn" id="btn-theme" type="button" aria-label="Hell oder dunkel umschalten" title="Hell / Dunkel">
+        <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5A6.8 6.8 0 0 1 12 3.5Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
   </div>
 </header>
 
 <main id="main">
 
-  <!-- ============ ÜBERSICHT ============ -->
+  <!-- ======================= ÜBERSICHT ======================= -->
   <section class="view" id="view-overview" data-view="overview">
 
-    <div class="empty" id="empty-state" hidden>
+    <div class="empty glass" id="empty-state" hidden>
       <div class="empty__icon" aria-hidden="true">
         <svg viewBox="0 0 48 48" width="44" height="44"><path d="M6 34 16 22l8 7 12-17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M30 12h8v8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </div>
       <h1>Noch keine Daten</h1>
       <p>Lade deinen comdirect-Depotbestand als CSV hoch. Die Datei wird direkt hier im Browser gelesen und bleibt auf diesem Gerät.</p>
-      <button class="btn btn--primary" type="button" data-goto="import">Depot-CSV importieren</button>
+      <button class="btn btn--primary" type="button" data-goto="more">Depot-CSV importieren</button>
       <p class="empty__hint">comdirect &rsaquo; Depot &rsaquo; Depotübersicht &rsaquo; Export (CSV)</p>
     </div>
 
@@ -52,30 +57,38 @@
         <p class="hero__delta"><span class="delta" id="hero-delta"></span><span class="hero__deltalabel" id="hero-delta-label"></span></p>
       </section>
 
+      <section class="card glass" id="card-live" aria-labelledby="h-live" hidden>
+        <div class="card__head">
+          <h2 class="card__title" id="h-live">Kurse heute</h2>
+          <button class="btn btn--sm btn--ghost" type="button" data-goto="today">Alle ansehen</button>
+        </div>
+        <div id="live-summary"></div>
+      </section>
+
       <section class="tiles" aria-label="Kennzahlen">
-        <article class="tile">
+        <article class="tile glass">
           <p class="tile__label">Eingesetztes Kapital</p>
           <p class="tile__value" id="tile-invested">–</p>
           <p class="tile__sub" id="tile-invested-sub"></p>
         </article>
-        <article class="tile">
+        <article class="tile glass">
           <p class="tile__label">Gewinn / Verlust</p>
           <p class="tile__value" id="tile-gain">–</p>
           <p class="tile__sub"><span class="delta" id="tile-gain-pct"></span></p>
         </article>
-        <article class="tile">
+        <article class="tile glass">
           <p class="tile__label">Positionen</p>
           <p class="tile__value" id="tile-count">–</p>
           <p class="tile__sub" id="tile-count-sub"></p>
         </article>
-        <article class="tile">
+        <article class="tile glass">
           <p class="tile__label">Größte Position</p>
           <p class="tile__value" id="tile-top">–</p>
           <p class="tile__sub" id="tile-top-sub"></p>
         </article>
       </section>
 
-      <section class="card" id="card-history" aria-labelledby="h-history">
+      <section class="card glass" id="card-history" aria-labelledby="h-history">
         <div class="card__head">
           <h2 class="card__title" id="h-history">Wertentwicklung</h2>
           <div class="seg" role="group" aria-label="Zeitraum" id="range-picker">
@@ -85,10 +98,13 @@
           </div>
         </div>
         <div class="chart" id="chart-history"></div>
-        <p class="card__note" id="history-note"></p>
+        <div class="card__head">
+          <p class="card__note" id="history-note"></p>
+          <button class="btn btn--sm btn--ghost" type="button" data-goto="history">Stichtage</button>
+        </div>
       </section>
 
-      <section class="card" aria-labelledby="h-alloc">
+      <section class="card glass" aria-labelledby="h-alloc">
         <div class="card__head">
           <h2 class="card__title" id="h-alloc">Aufteilung</h2>
           <div class="seg" role="group" aria-label="Aufteilung nach" id="alloc-picker">
@@ -100,12 +116,12 @@
         <p class="card__note" id="alloc-note"></p>
       </section>
 
-      <section class="card" aria-labelledby="h-movers">
+      <section class="card glass" aria-labelledby="h-movers">
         <div class="card__head"><h2 class="card__title" id="h-movers">Stärkste Bewegungen</h2></div>
         <div id="movers-body"></div>
       </section>
 
-      <section class="card" aria-labelledby="h-risk">
+      <section class="card glass" aria-labelledby="h-risk">
         <div class="card__head"><h2 class="card__title" id="h-risk">Streuung</h2></div>
         <div id="risk-body"></div>
       </section>
@@ -113,7 +129,25 @@
     </div>
   </section>
 
-  <!-- ============ POSITIONEN ============ -->
+  <!-- ========================= HEUTE ========================= -->
+  <section class="view" id="view-today" data-view="today" hidden>
+    <div class="viewhead">
+      <h1 class="viewhead__title">Heute</h1>
+      <p class="viewhead__sub" id="today-sub">Kursbewegung deiner Positionen seit dem Börsenschluss von gestern.</p>
+    </div>
+    <div id="today-body"></div>
+  </section>
+
+  <!-- ========================= AKTIEN ========================= -->
+  <section class="view" id="view-stocks" data-view="stocks" hidden>
+    <div class="viewhead">
+      <h1 class="viewhead__title">Aktien</h1>
+      <p class="viewhead__sub">Kurse und Schlagzeilen zu deinen Werten.</p>
+    </div>
+    <div id="stocks-body"></div>
+  </section>
+
+  <!-- ======================= POSITIONEN ======================= -->
   <section class="view" id="view-positions" data-view="positions" hidden>
     <div class="viewhead">
       <h1 class="viewhead__title">Positionen</h1>
@@ -128,6 +162,7 @@
         <span class="sr-only">Sortieren nach</span>
         <select id="pos-sort">
           <option value="value">Wert</option>
+          <option value="today">Heute</option>
           <option value="gainAbs">Gewinn (€)</option>
           <option value="gainPct">Gewinn (%)</option>
           <option value="name">Name</option>
@@ -137,7 +172,7 @@
     <div id="positions-body"></div>
   </section>
 
-  <!-- ============ VERLAUF ============ -->
+  <!-- ======================== VERLAUF ========================= -->
   <section class="view" id="view-history" data-view="history" hidden>
     <div class="viewhead">
       <h1 class="viewhead__title">Verlauf</h1>
@@ -146,14 +181,17 @@
     <div id="history-body"></div>
   </section>
 
-  <!-- ============ IMPORT & DATEN ============ -->
-  <section class="view" id="view-import" data-view="import" hidden>
+  <!-- ========================== MEHR ========================== -->
+  <section class="view" id="view-more" data-view="more" hidden>
     <div class="viewhead">
-      <h1 class="viewhead__title">Import</h1>
-      <p class="viewhead__sub">comdirect &rsaquo; Depot &rsaquo; Depotübersicht &rsaquo; Export als CSV. Die Datei wird nur in deinem Browser gelesen.</p>
+      <h1 class="viewhead__title">Mehr</h1>
+      <p class="viewhead__sub">Import, Darstellung, Marktdaten und Sicherung.</p>
     </div>
 
-    <section class="card">
+    <!-- Import -->
+    <section class="card glass" aria-labelledby="h-import">
+      <div class="card__head"><h2 class="card__title" id="h-import">Depot importieren</h2></div>
+      <p class="card__note">comdirect &rsaquo; Depot &rsaquo; Depotübersicht &rsaquo; Export als CSV. Die Datei wird nur in deinem Browser gelesen.</p>
       <div class="drop" id="drop">
         <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
         <p class="drop__title">CSV-Datei auswählen</p>
@@ -164,13 +202,13 @@
         <summary>Datei lässt sich nicht auswählen? Inhalt einfügen</summary>
         <label class="field field--block">
           <span class="field__label">CSV-Inhalt einfügen</span>
-          <textarea id="paste-area" rows="6" placeholder="WKN;Bezeichnung;Stück;Einstandskurs;..." spellcheck="false"></textarea>
+          <textarea id="paste-area" rows="6" placeholder="Stück / Nominale;Bezeichnung;Kaufkurs in EUR;…" spellcheck="false"></textarea>
         </label>
         <button class="btn" type="button" id="btn-paste">Eingefügten Text lesen</button>
       </details>
     </section>
 
-    <section class="card" id="import-preview" hidden aria-labelledby="h-preview">
+    <section class="card glass" id="import-preview" hidden aria-labelledby="h-preview">
       <div class="card__head"><h2 class="card__title" id="h-preview">Vorschau</h2></div>
       <div id="preview-status"></div>
       <div id="mapping-body"></div>
@@ -192,7 +230,46 @@
       </div>
     </section>
 
-    <section class="card" aria-labelledby="h-backup">
+    <!-- Darstellung -->
+    <section class="card glass" aria-labelledby="h-theme">
+      <div class="card__head"><h2 class="card__title" id="h-theme">Darstellung</h2></div>
+      <div class="seg seg--wide" role="group" aria-label="Design" id="theme-picker">
+        <button type="button" class="seg__btn" data-theme="auto">System</button>
+        <button type="button" class="seg__btn" data-theme="light">Hell</button>
+        <button type="button" class="seg__btn" data-theme="dark">Dunkel</button>
+      </div>
+      <p class="card__note">„System“ folgt der Einstellung deines Handys und wechselt abends von selbst.</p>
+    </section>
+
+    <!-- Marktdaten -->
+    <section class="card glass" aria-labelledby="h-market">
+      <div class="card__head">
+        <h2 class="card__title" id="h-market">Marktdaten</h2>
+        <span class="pill pill--flat" id="market-status">nicht verbunden</span>
+      </div>
+      <p class="card__note">Für Live-Kurse und Nachrichten braucht die App ein kleines Zwischenstück, weil eine reine Webseite die Börsendaten nicht direkt abfragen darf. Die Anleitung steht im Ordner <code>worker/</code> im Repository.</p>
+      <label class="field field--block">
+        <span class="field__label">Adresse des Workers</span>
+        <div class="field__row">
+          <input type="url" id="worker-url" placeholder="https://…​.workers.dev" autocomplete="off" spellcheck="false">
+          <button class="btn btn--sm" type="button" id="btn-test-worker">Prüfen</button>
+        </div>
+        <span class="field__hint">Leer lassen, wenn du ohne Live-Kurse arbeiten willst. „Heute“ zeigt dann die Tagesspanne aus deiner CSV.</span>
+      </label>
+      <div id="market-hint"></div>
+    </section>
+
+    <!-- Verlauf -->
+    <section class="card glass" aria-labelledby="h-more-history">
+      <div class="card__head">
+        <h2 class="card__title" id="h-more-history">Stichtage</h2>
+        <button class="btn btn--sm btn--ghost" type="button" data-goto="history">Öffnen</button>
+      </div>
+      <p class="card__note" id="more-history-note"></p>
+    </section>
+
+    <!-- Sicherung -->
+    <section class="card glass" aria-labelledby="h-backup">
       <div class="card__head"><h2 class="card__title" id="h-backup">Daten &amp; Sicherung</h2></div>
       <p class="card__note">Alles liegt ausschließlich im Speicher dieses Browsers. Wenn du den Browser-Speicher löschst oder das Gerät wechselst, sind die Daten weg. Sichere sie darum ab und zu als Datei.</p>
       <div class="actions">
@@ -200,7 +277,7 @@
         <button class="btn" type="button" id="btn-import-backup">Sicherung einspielen</button>
         <input type="file" id="backup-input" accept=".json,application/json" class="sr-only">
       </div>
-      <div class="actions actions--danger">
+      <div class="actions">
         <button class="btn btn--danger" type="button" id="btn-wipe">Alle Daten löschen</button>
       </div>
       <p class="card__note" id="storage-note"></p>
@@ -211,20 +288,24 @@
 
 <nav class="tabbar" aria-label="Hauptnavigation">
   <button type="button" class="tab is-active" data-goto="overview">
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 17 9.5 11l4 3.5L20 7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true"><path d="M4 17 9.5 11l4 3.5L20 7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
     <span>Übersicht</span>
   </button>
+  <button type="button" class="tab" data-goto="today">
+    <svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    <span>Heute</span>
+  </button>
+  <button type="button" class="tab" data-goto="stocks">
+    <svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true"><path d="M4 20V9m5 11V5m5 15v-8m5 8V7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+    <span>Aktien</span>
+  </button>
   <button type="button" class="tab" data-goto="positions">
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+    <svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
     <span>Positionen</span>
   </button>
-  <button type="button" class="tab" data-goto="history">
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-    <span>Verlauf</span>
-  </button>
-  <button type="button" class="tab" data-goto="import">
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 18h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
-    <span>Import</span>
+  <button type="button" class="tab" data-goto="more">
+    <svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true"><circle cx="5.5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="18.5" cy="12" r="1.6" fill="currentColor"/></svg>
+    <span>Mehr</span>
   </button>
 </nav>
 
@@ -234,11 +315,23 @@
   <div class="sheet__inner">
     <div class="sheet__head">
       <h2 id="pos-dialog-title" class="sheet__title">Position</h2>
-      <button type="button" class="iconbtn" id="pos-dialog-close" aria-label="Schließen">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+      <button type="button" class="iconbtn" data-close-dialog="pos-dialog" aria-label="Schließen">
+        <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
       </button>
     </div>
     <div id="pos-dialog-body"></div>
+  </div>
+</dialog>
+
+<dialog class="sheet" id="news-dialog" aria-labelledby="news-dialog-title">
+  <div class="sheet__inner">
+    <div class="sheet__head">
+      <h2 id="news-dialog-title" class="sheet__title">Nachrichten</h2>
+      <button type="button" class="iconbtn" data-close-dialog="news-dialog" aria-label="Schließen">
+        <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div id="news-dialog-body"></div>
   </div>
 </dialog>
 

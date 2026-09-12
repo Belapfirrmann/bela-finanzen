@@ -9,7 +9,7 @@ const emptyState = () => ({
   version: 1,
   snapshots: [],           // [{ date, importedAt, flow, positions: [...] }]
   meta: {},                // key -> { assetClass }
-  settings: { theme: 'auto', range: 'max' },
+  settings: { theme: 'auto', range: 'max', workerUrl: '' },
 });
 
 let state = emptyState();
@@ -100,12 +100,14 @@ export const latestSnapshot = () => state.snapshots[state.snapshots.length - 1] 
 
 /* ------------------------------------------------ Zusatzinfos je Position */
 
-export function setAssetClass(key, assetClass) {
+/** Zusatzinfos zu einer Position (Anlageklasse, Börsensymbol). */
+export function setMeta(key, patch) {
   if (!key) return;
-  state.meta[key] = { ...(state.meta[key] || {}), assetClass: assetClass || null };
+  state.meta[key] = { ...(state.meta[key] || {}), ...patch };
   persist();
 }
 
+export const setAssetClass = (key, assetClass) => setMeta(key, { assetClass: assetClass || null });
 export const assetClassOf = (key) => state.meta?.[key]?.assetClass ?? null;
 
 /* -------------------------------------------------------------- Einstellungen */

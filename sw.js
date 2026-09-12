@@ -1,7 +1,7 @@
 // Offline-Cache für die App-Hülle. Es werden nur eigene Dateien gespeichert,
 // niemals Finanzdaten - die liegen ausschließlich im localStorage.
 
-const CACHE = 'bela-finanzen-v1';
+const CACHE = 'bela-finanzen-v2';
 const SHELL = [
   './',
   './index.html',
@@ -11,6 +11,8 @@ const SHELL = [
   './js/parse.js',
   './js/stats.js',
   './js/charts.js',
+  './js/market.js',
+  './js/views-market.js',
   './js/format.js',
   './app.webmanifest',
   './icons/icon.svg',

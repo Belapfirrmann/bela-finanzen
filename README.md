@@ -21,6 +21,19 @@ Zwei Konsequenzen daraus:
 
 Committe niemals echte Exporte ins Repository - `.gitignore` blockt `*.csv` bereits.
 
+## Die fünf Bereiche
+
+| Tab | Inhalt |
+|---|---|
+| **Übersicht** | Depotwert, Gewinn, Wertentwicklung, Aufteilung, Streuung |
+| **Heute** | Kursbewegung seit Börsenschluss gestern, je Position und in Summe |
+| **Aktien** | Kurse und deutschsprachige Schlagzeilen zu deinen Werten |
+| **Positionen** | alle Wertpapiere, sortierbar, mit Detailblatt |
+| **Mehr** | Import, Darstellung, Marktdaten, Stichtage, Sicherung |
+
+Hell und dunkel lassen sich unter **Mehr → Darstellung** umstellen; „System“ folgt
+der Einstellung des Handys. Der Mond oben rechts schaltet schnell durch.
+
 ## Was das Dashboard zeigt
 
 * **Depotwert** mit Veränderung seit dem letzten Stichtag, wahlweise um Ein- und
@@ -35,6 +48,26 @@ Committe niemals echte Exporte ins Repository - `.gitignore` blockt `*.csv` bere
 
 Jede Auswertung gibt es zusätzlich als Tabelle, damit die Zahlen auch ohne Farben
 lesbar sind.
+
+## Live-Kurse und Nachrichten
+
+Optional. Ohne sie läuft alles andere unverändert weiter.
+
+Eine Webseite darf Börsendaten nicht direkt abfragen, darum liegt im Ordner
+`worker/` ein kleines Zwischenstück für Cloudflare Workers. Es braucht **keinen
+API-Schlüssel**, speichert nichts und holt Kurse von Yahoo Finance sowie
+Schlagzeilen von Google News. Einrichtung und Fehlersuche stehen in
+[`worker/README.md`](worker/README.md); die Adresse trägst du danach unter
+**Mehr → Marktdaten** ein.
+
+Damit ein Wertpapier einen Kurs bekommt, braucht es ein Börsensymbol. Tippe in
+„Heute“ oder „Aktien“ auf die Position, such den Wert (Name oder ISIN) und wähl
+das Symbol aus. Die Zuordnung wird gespeichert und gilt für jeden weiteren
+Import. Weicht der Börsenkurs stark vom Kurs aus deiner CSV ab, warnt die App —
+dann gehört vermutlich ein anderes Symbol dazu.
+
+Die Tagesrechnung weist immer aus, wie viele Positionen erfasst sind. Was kein
+Symbol hat, fehlt in der Summe und wird auch so benannt.
 
 ## Benutzen
 
@@ -103,9 +136,12 @@ ES-Module, die brauchen einen Webserver.
 index.html            Aufbau der Oberfläche
 css/app.css           Farbrollen, helles und dunkles Design
 js/main.js            Ansichten, Import-Ablauf, Ereignisse
+js/market.js          Kurse, Nachrichten, Symbolzuordnung
+js/views-market.js    die Ansichten „Heute" und „Aktien"
 js/parse.js           CSV-Erkennung und comdirect-Spaltenlogik
 js/store.js           localStorage, Stichtage, Sicherung
 js/stats.js           Auswertungen
 js/charts.js          SVG-Diagramme ohne Fremdbibliothek
 sw.js                 Offline-Cache der App-Hülle
+worker/worker.js      Marktdaten-Zwischenstück für Cloudflare
 ```

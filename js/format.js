@@ -77,3 +77,24 @@ export function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+
+const rtf = new Intl.RelativeTimeFormat('de-DE', { numeric: 'auto' });
+
+/** "vor 12 Minuten", "vor 3 Stunden" … */
+export function relTime(ms) {
+  if (!isNum(ms)) return '';
+  const diff = (ms - Date.now()) / 1000;
+  const steps = [[60, 'second'], [3600, 'minute'], [86400, 'hour'], [604800, 'day']];
+  let unit = 'week', value = diff / 604800;
+  for (let i = 0; i < steps.length; i++) {
+    if (Math.abs(diff) < steps[i][0]) {
+      unit = steps[i][1];
+      value = diff / (i === 0 ? 1 : steps[i - 1][0]);
+      break;
+    }
+  }
+  return rtf.format(Math.round(value), unit);
+}
+
+const timeHm = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
+export const clock = (ms) => (isNum(ms) ? timeHm.format(new Date(ms)) : '');
