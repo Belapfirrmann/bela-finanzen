@@ -268,6 +268,162 @@ export async function intraday(symbol, { force = false } = {}) {
   return { ok: true, points: s.points, currency: s.currency, error: null };
 }
 
+/* -------------------------------------- Echter Verlauf aus den Umsätzen */
+
+const secKey = (t) => (t.isin || t.wkn || slug(t.name));
+
+/**
+ * Depotverlauf aus den tatsächlichen Umsätzen.
+ *
+ * Anders als `portfolioHistory` rechnet das mit dem Bestand, der an jedem Tag
+ * wirklich im Depot lag - Käufe und Verkäufe eingeschlossen. Dafür braucht es
+ * einen Umsatzexport, und zu jedem Papier muss ein Börsensymbol gefunden werden.
+ */
+export async function historyFromTransactions(transactions, positions, { range = '1y', force = false } = {}) {
+  if (!hasMarket()) return { ok: false, points: [], error: 'Marktdaten sind nicht verbunden.' };
+  if (!transactions?.length) return { ok: false, points: [], error: 'Keine Umsätze vorhanden.' };
+
+  // Papiere aus den Umsätzen sammeln, jüngster Kurs als Referenz für die Prüfung.
+  const securities = new Map();
+  for (const t of transactions) {
+    const k = secKey(t);
+    const prev = securities.get(k);
+    if (!prev || t.date >= prev.lastDate) {
+      securities.set(k, {
+        key: k, name: t.name, isin: t.isin, wkn: t.wkn,
+        price: t.price ?? prev?.price ?? null, lastDate: t.date,
+      });
+    }
+  }
+
+  const resolved = new Map();   // Papierschlüssel -> Symbol
+  const unresolved = [];
+
+  for (const sec of securities.values()) {
+    // Liegt das Papier noch im Depot, ist das Symbol meist schon bekannt.
+    const match = positions.find((p) =>
+      (sec.isin && p.isin && p.isin.toUpperCase() === sec.isin) ||
+      (sec.wkn && p.wkn && p.wkn.toUpperCase() === sec.wkn) ||
+      slug(p.name) === slug(sec.name));
+    const known = match ? symbolOf(match.key) : null;
+    if (known) { resolved.set(sec.key, known); continue; }
+
+    let candidates = [];
+    for (const term of [sec.isin, sec.wkn, suggestQuery(sec.name)].filter(Boolean)) {
+      const found = await search(term);
+      for (const r of (found.results || []).slice(0, 6)) {
+        if (!candidates.some((c) => c.symbol === r.symbol)) candidates.push(r);
+      }
+      if (candidates.length) break;
+    }
+    const best = candidates.length ? await pickCandidate({ price: sec.price }, candidates) : null;
+    if (best) resolved.set(sec.key, best.symbol);
+    else unresolved.push(sec);
+  }
+
+  if (!resolved.size) {
+    return { ok: false, points: [], unresolved, error: 'Zu keinem Papier ließ sich ein Börsenkurs finden.' };
+  }
+
+  const symbols = [...new Set(resolved.values())];
+  const res = await history(symbols, { range, interval: '1d', force });
+  if (!res.ok) return { ok: false, points: [], unresolved, error: res.error };
+
+  const currencies = [...new Set(symbols.map((sy) => res.bySymbol.get(sy)?.currency).filter((c) => c && c !== 'EUR'))];
+  const fx = new Map();
+  if (currencies.length) {
+    const fxRes = await history(currencies.map((c) => `EUR${c}=X`), { range, interval: '1d', force });
+    for (const c of currencies) {
+      const sr = fxRes.bySymbol.get(`EUR${c}=X`);
+      if (sr && !sr.error) fx.set(c, indexByDay(sr.points));
+    }
+  }
+
+  // Kursreihen je Papier, nur was auch umrechenbar ist.
+  const priceByKey = new Map();
+  const curByKey = new Map();
+  for (const [k, sym] of resolved) {
+    const sr = res.bySymbol.get(sym);
+    if (!sr || sr.error || !sr.points?.length) { unresolved.push(securities.get(k)); continue; }
+    const cur = sr.currency && sr.currency !== 'EUR' ? sr.currency : null;
+    if (cur && !fx.has(cur)) { unresolved.push(securities.get(k)); continue; }
+    priceByKey.set(k, indexByDay(sr.points));
+    curByKey.set(k, cur);
+  }
+  if (!priceByKey.size) return { ok: false, points: [], unresolved, error: 'Keine verwertbaren Kursreihen.' };
+
+  // Bewegungen je Papier und Tag
+  const moves = new Map();
+  for (const t of transactions) {
+    const k = secKey(t);
+    if (!priceByKey.has(k)) continue;
+    if (!moves.has(k)) moves.set(k, new Map());
+    const m = moves.get(k);
+    m.set(t.date, (m.get(t.date) || 0) + t.side * t.qty);
+  }
+  const flowByDay = new Map();
+  for (const t of transactions) {
+    if (t.amount == null) continue;
+    flowByDay.set(t.date, (flowByDay.get(t.date) || 0) + t.side * t.amount);
+  }
+
+  const days = [...new Set([...priceByKey.values()].flatMap((m) => [...m.keys()]))].sort();
+  const qty = new Map();
+  const lastPx = new Map();
+  const lastFx = new Map();
+  let invested = 0;
+  const points = [], investedPoints = [];
+
+  // Anfangsbestand: alles, was vor dem ersten Kurstag gekauft wurde, liegt schon
+  // im Depot. Ohne diesen Schritt fängt jeder kürzere Zeitraum bei null an.
+  const firstDay = days[0];
+  if (firstDay) {
+    for (const [k, m] of moves) {
+      for (const [d, delta] of m) if (d < firstDay) qty.set(k, (qty.get(k) || 0) + delta);
+    }
+    for (const [d, flow] of flowByDay) if (d < firstDay) invested += flow;
+  }
+
+  for (const day of days) {
+    for (const [k, m] of moves) if (m.has(day)) qty.set(k, (qty.get(k) || 0) + m.get(day));
+    if (flowByDay.has(day)) invested += flowByDay.get(day);
+
+    let sum = 0, any = false;
+    for (const [k, series] of priceByKey) {
+      const held = qty.get(k) || 0;
+      if (held <= 0) continue;
+      const px = series.get(day) ?? lastPx.get(k);
+      if (px == null) continue;
+      lastPx.set(k, px);
+
+      let factor = 1;
+      const cur = curByKey.get(k);
+      if (cur) {
+        const rate = fx.get(cur).get(day) ?? lastFx.get(cur);
+        if (rate == null) continue;
+        lastFx.set(cur, rate);
+        factor = 1 / rate;
+      }
+      sum += held * px * factor;
+      any = true;
+    }
+    if (any) {
+      points.push({ date: day, value: sum });
+      investedPoints.push({ date: day, value: invested });
+    }
+  }
+
+  return {
+    ok: points.length > 1,
+    points,
+    investedPoints,
+    covered: priceByKey.size,
+    total: securities.size,
+    unresolved,
+    error: points.length > 1 ? null : 'Aus den Umsätzen ließ sich keine durchgehende Reihe bilden.',
+  };
+}
+
 /* ------------------------------------------------------------ Wechselkurse */
 
 const fxCache = new Map();

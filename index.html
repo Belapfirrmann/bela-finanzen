@@ -227,6 +227,22 @@
       </div>
     </section>
 
+    <!-- Umsätze -->
+    <section class="card glass" aria-labelledby="h-tx">
+      <div class="card__head">
+        <h2 class="card__title" id="h-tx">Umsätze für den echten Verlauf</h2>
+        <span class="pill pill--flat" id="tx-status">keine</span>
+      </div>
+      <p class="card__note">Der Depotexport kennt nur den heutigen Tag. Damit die Wertentwicklung deinen tatsächlichen Bestand von damals zeigt statt einer Hochrechnung aus dem heutigen, braucht es deine Käufe und Verkäufe: bei comdirect unter <strong>Depot &rsaquo; Umsätze</strong> (oder Wertpapierumsätze) den Zeitraum wählen und als CSV exportieren.</p>
+      <div class="drop" id="tx-drop">
+        <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <p class="drop__title">Umsatz-CSV auswählen</p>
+        <p class="drop__sub">oder hierher ziehen</p>
+        <input type="file" id="tx-input" accept=".csv,.txt,text/csv,text/plain" class="sr-only">
+      </div>
+      <div id="tx-result"></div>
+    </section>
+
     <!-- Darstellung -->
     <section class="card glass" aria-labelledby="h-theme">
       <div class="card__head"><h2 class="card__title" id="h-theme">Darstellung</h2></div>

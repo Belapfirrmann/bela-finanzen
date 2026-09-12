@@ -443,4 +443,153 @@ export function parseDepotCsv(text) {
   };
 }
 
+/* ============================================================== Umsätze */
+
+/** Spalten, wie sie in Wertpapierumsatz-Exporten vorkommen. */
+export const TX_FIELDS = [
+  { key: 'date',   label: 'Geschäftstag', aliases: ['geschaftstag', 'geschafts', 'handelstag', 'buchungstag', 'valuta', 'datum', 'ausfuhrungstag'] },
+  { key: 'type',   label: 'Art',          aliases: ['umsatzart', 'geschaftsart', 'transaktionsart', 'art', 'typ', 'vorgang', 'buchungstext'] },
+  { key: 'name',   label: 'Bezeichnung',  aliases: ['bezeichnung', 'wertpapier', 'wertpapierbezeichnung', 'name', 'produkt'] },
+  { key: 'isin',   label: 'ISIN',         aliases: ['isin'] },
+  { key: 'wkn',    label: 'WKN',          aliases: ['wkn', 'wertpapierkennnummer'] },
+  { key: 'qty',    label: 'Stück / Nom.', aliases: ['stucknom', 'stucknominal', 'stuck', 'stuckzahl', 'nominal', 'anzahl', 'menge'] },
+  { key: 'price',  label: 'Kurs',         aliases: ['ausfuhrungskurs', 'ausfuhrungspreis', 'abrechnungskurs', 'kurs', 'preis'] },
+  { key: 'amount', label: 'Betrag',       aliases: ['umsatzineur', 'gesamtbetrag', 'betrag', 'umsatz', 'wert', 'kurswert'] },
+];
+
+const BUY_RE = /(kauf|zeichnung|einbuchung|sparplan|erwerb|einlieferung|zugang|bezug)/i;
+const SELL_RE = /(verkauf|ausbuchung|veraußerung|veräußerung|auslieferung|abgang|tilgung|ruckzahlung|rückzahlung)/i;
+
+/**
+ * Liest einen Wertpapierumsatz-Export. Daraus lässt sich rekonstruieren, was
+ * wann im Depot lag - die Voraussetzung für einen echten Verlauf statt einer
+ * Hochrechnung aus dem heutigen Bestand.
+ */
+export function parseTransactionsCsv(text) {
+  const warnings = [];
+  const delimiter = detectDelimiter(text);
+  const rows = splitCsv(text, delimiter);
+  const isBlank = (r) => !r.some((c) => c !== '');
+
+  const headerIdx = findTxHeader(rows);
+  if (headerIdx === -1) {
+    return {
+      ok: false, delimiter, rows, headerIdx: -1, header: [], dataRows: [],
+      mapping: {}, transactions: [],
+      warnings: ['Keine Kopfzeile mit bekannten Spaltennamen gefunden. Ordne die Spalten von Hand zu.'],
+    };
+  }
+
+  const header = rows[headerIdx];
+  let end = headerIdx + 1;
+  while (end < rows.length && !isBlank(rows[end])) end++;
+  const dataRows = rows.slice(headerIdx + 1, end).filter((r) => !isBlank(r) && r.length >= 3);
+
+  const mapping = autoMapTx(header, dataRows);
+  const { transactions, skipped } = buildTransactions(dataRows, mapping);
+
+  if (mapping.date === undefined) warnings.push('Keine Datumsspalte erkannt. Ohne Datum lässt sich kein Verlauf bauen.');
+  if (mapping.qty === undefined) warnings.push('Keine Stückzahl erkannt. Ohne sie bleibt unklar, wie viel wann im Depot lag.');
+  if (mapping.type === undefined) warnings.push('Keine Spalte für Kauf oder Verkauf erkannt. Die Richtung wird aus den Vorzeichen abgeleitet.');
+  if (skipped) warnings.push(`${skipped} ${skipped === 1 ? 'Zeile' : 'Zeilen'} übersprungen, weil Datum oder Stückzahl fehlten.`);
+
+  return { ok: transactions.length > 0, delimiter, rows, headerIdx, header, dataRows, mapping, transactions, warnings };
+}
+
+function scoreTxCell(cell) {
+  const n = norm(cell);
+  if (!n) return null;
+  let best = null;
+  for (const f of TX_FIELDS) {
+    for (const a of f.aliases) {
+      let sc = 0;
+      if (n === a) sc = 100;
+      else if (n.startsWith(a)) sc = 70 - (n.length - a.length);
+      else if (n.includes(a)) sc = 45 - (n.length - a.length);
+      if (sc > 0 && (!best || sc > best.score)) best = { key: f.key, score: sc };
+    }
+  }
+  return best;
+}
+
+function findTxHeader(rows) {
+  let bestIdx = -1, bestScore = 0;
+  for (let i = 0; i < Math.min(rows.length, 80); i++) {
+    if (rows[i].filter((c) => c !== '').length < 3) continue;
+    let hits = 0;
+    for (const cell of rows[i]) if (scoreTxCell(cell)) hits++;
+    if (hits > bestScore) { bestScore = hits; bestIdx = i; }
+  }
+  return bestScore >= 3 ? bestIdx : -1;
+}
+
+function autoMapTx(headerRow, dataRows) {
+  const cands = [];
+  headerRow.forEach((cell, idx) => {
+    const m = scoreTxCell(cell);
+    if (m) cands.push({ idx, ...m });
+  });
+  cands.sort((a, b) => b.score - a.score);
+
+  const mapping = {};
+  const used = new Set();
+  for (const c of cands) {
+    if (mapping[c.key] !== undefined || used.has(c.idx)) continue;
+    mapping[c.key] = c.idx;
+    used.add(c.idx);
+  }
+  // Spalten ohne Überschrift anhand ihres Inhalts erkennen
+  for (let idx = 0; idx < headerRow.length; idx++) {
+    if (used.has(idx)) continue;
+    const vals = dataRows.map((r) => r[idx] ?? '').filter(Boolean);
+    if (vals.length < 2) continue;
+    if (mapping.isin === undefined && vals.filter((v) => /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(v)).length > vals.length * 0.6) {
+      mapping.isin = idx; used.add(idx);
+    }
+  }
+  return mapping;
+}
+
+function buildTransactions(dataRows, mapping) {
+  const get = (row, key) => {
+    const i = mapping[key];
+    return i === undefined || i === null || i < 0 ? '' : (row[i] ?? '');
+  };
+  const transactions = [];
+  let skipped = 0;
+
+  for (const row of dataRows) {
+    const iso = toIso(get(row, 'date'));
+    let qty = parseNumber(get(row, 'qty'));
+    const price = parseNumber(get(row, 'price'));
+    const amount = parseNumber(get(row, 'amount'));
+    const typeRaw = String(get(row, 'type') || '').trim();
+    const name = String(get(row, 'name') || '').trim();
+    const isin = (String(get(row, 'isin') || '').toUpperCase().match(/\b[A-Z]{2}[A-Z0-9]{9}[0-9]\b/) || [])[0] || null;
+    const wkn = String(get(row, 'wkn') || '').trim().toUpperCase() || null;
+
+    if (!iso || qty == null || qty === 0) { skipped++; continue; }
+    if (!name && !isin && !wkn) { skipped++; continue; }
+
+    // Richtung: erst die Textspalte, sonst die Vorzeichen von Stück oder Betrag.
+    // Verkauf zuerst prüfen - das Wort enthält "kauf".
+    let side = SELL_RE.test(typeRaw) ? -1 : BUY_RE.test(typeRaw) ? 1 : 0;
+    if (!side) side = qty < 0 ? -1 : (amount != null && amount < 0 ? 1 : 1);
+    qty = Math.abs(qty);
+
+    transactions.push({
+      date: iso,
+      side,                                    // 1 = Zugang, -1 = Abgang
+      type: typeRaw || (side > 0 ? 'Kauf' : 'Verkauf'),
+      name: name || isin || wkn,
+      isin, wkn,
+      qty,
+      price: price != null ? Math.abs(price) : (amount != null && qty ? Math.abs(amount) / qty : null),
+      amount: amount != null ? Math.abs(amount) : (price != null ? price * qty : null),
+    });
+  }
+  transactions.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return { transactions, skipped };
+}
+
 export { norm, FIELD_BY_KEY };

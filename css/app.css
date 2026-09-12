@@ -62,9 +62,10 @@
   --r-lg: 22px;
   --r-xl: 28px;
 
-  --lift: 0 1px 1px rgba(16, 20, 28, .04), 0 10px 30px -18px rgba(16, 20, 28, .45);
+  --lift: 0 1px 1px rgba(16, 20, 28, .05), 0 14px 34px -20px rgba(16, 20, 28, .55);
   --lift-high: 0 2px 6px rgba(16, 20, 28, .08), 0 24px 60px -28px rgba(16, 20, 28, .55);
 
+  --gap: 26px;
   --tabbar-h: 60px;
   --maxw: 760px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -105,7 +106,7 @@
     --amb-1: rgba(57, 135, 229, .30);
     --amb-2: rgba(25, 158, 112, .22);
     --amb-3: rgba(213, 81, 129, .18);
-    --lift: 0 1px 1px rgba(0, 0, 0, .5), 0 12px 34px -20px rgba(0, 0, 0, .9);
+    --lift: 0 1px 1px rgba(0, 0, 0, .55), 0 16px 40px -22px rgba(0, 0, 0, .95);
     --lift-high: 0 2px 8px rgba(0, 0, 0, .6), 0 28px 70px -30px rgba(0, 0, 0, 1);
   }
 }
@@ -137,7 +138,7 @@
   --amb-1: rgba(57, 135, 229, .30);
   --amb-2: rgba(25, 158, 112, .22);
   --amb-3: rgba(213, 81, 129, .18);
-  --lift: 0 1px 1px rgba(0, 0, 0, .5), 0 12px 34px -20px rgba(0, 0, 0, .9);
+  --lift: 0 1px 1px rgba(0, 0, 0, .55), 0 16px 40px -22px rgba(0, 0, 0, .95);
   --lift-high: 0 2px 8px rgba(0, 0, 0, .6), 0 28px 70px -30px rgba(0, 0, 0, 1);
 }
 
@@ -246,9 +247,19 @@ a { color: var(--accent); }
 /* ----------------------------------------------------------- Layout */
 #main {
   max-width: var(--maxw); margin: 0 auto;
-  padding: 20px 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 48px);
+  padding: 20px 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 56px);
 }
-.view { display: flex; flex-direction: column; gap: 22px; }
+.view { display: flex; flex-direction: column; gap: var(--gap); }
+
+/* Die Karten liegen in Hüllen, die selbst keine Abstände hatten - darum bekommen
+   sie hier dieselbe Spaltenlogik wie die Ansicht darüber. */
+#overview-content,
+#today-body,
+#stocks-body,
+#positions-body,
+#history-body {
+  display: flex; flex-direction: column; gap: var(--gap);
+}
 [hidden] { display: none !important; }
 
 .viewhead { display: flex; flex-direction: column; gap: 4px; padding: 4px 2px 0; }
@@ -300,8 +311,8 @@ a { color: var(--accent); }
 
 /* ----------------------------------------------------------- Karten */
 .card {
-  border-radius: var(--r-xl); padding: 18px 17px 19px;
-  display: flex; flex-direction: column; gap: 15px;
+  border-radius: var(--r-xl); padding: 20px 18px 22px;
+  display: flex; flex-direction: column; gap: 16px;
 }
 .card__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .card__title { font-size: 15px; font-weight: 650; letter-spacing: -.015em; }

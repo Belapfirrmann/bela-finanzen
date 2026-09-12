@@ -8,6 +8,7 @@ export const ASSET_CLASSES = ['ETF', 'Aktie', 'Anleihe', 'Fonds', 'Krypto', 'Son
 const emptyState = () => ({
   version: 1,
   snapshots: [],           // [{ date, importedAt, flow, positions: [...] }]
+  transactions: [],        // [{ date, side, type, name, isin, wkn, qty, price, amount }]
   meta: {},                // key -> { assetClass }
   settings: { theme: 'auto', range: '6mo', workerUrl: '', stocksFilter: 'equity' },
 });
@@ -36,6 +37,7 @@ function migrate(obj) {
     ...base,
     ...obj,
     snapshots: Array.isArray(obj.snapshots) ? obj.snapshots : [],
+    transactions: Array.isArray(obj.transactions) ? obj.transactions : [],
     meta: obj.meta && typeof obj.meta === 'object' ? obj.meta : {},
     settings: { ...base.settings, ...(obj.settings || {}) },
   };
@@ -97,6 +99,28 @@ export function updateSnapshotFlow(date, flow) {
 }
 
 export const latestSnapshot = () => state.snapshots[state.snapshots.length - 1] ?? null;
+
+/* ---------------------------------------------------------------- Umsätze */
+
+/** Ersetzt die gespeicherten Umsätze; doppelte Zeilen fallen dabei weg. */
+export function saveTransactions(list) {
+  const seen = new Set();
+  state.transactions = [...list]
+    .filter((t) => {
+      const id = `${t.date}|${t.name}|${t.side}|${t.qty}|${t.price ?? ''}`;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  persist();
+  return state.transactions.length;
+}
+
+export function clearTransactions() {
+  state.transactions = [];
+  persist();
+}
 
 /* ------------------------------------------------ Zusatzinfos je Position */
 

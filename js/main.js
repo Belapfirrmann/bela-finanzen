@@ -2,7 +2,7 @@
 
 import * as store from './store.js';
 import { ASSET_CLASSES } from './store.js';
-import { parseDepotCsv, buildPositions, decodeBuffer, FIELDS, parseNumber } from './parse.js';
+import { parseDepotCsv, parseTransactionsCsv, buildPositions, decodeBuffer, FIELDS, parseNumber } from './parse.js';
 import * as stats from './stats.js';
 import * as market from './market.js';
 import { lineChart, donut, foldToTop, responsive, sparkline } from './charts.js';
@@ -241,6 +241,7 @@ async function paintHistoryChart(snaps, alloc) {
   const box = $('#chart-history');
   const note = $('#history-note');
   const snapSeries = stats.valueSeries(snaps, RANGE_DAYS[range] ?? 'max');
+  const apiRange = range === 'max' ? '5y' : range;
 
   const drawSnaps = () => {
     if (snapSeries.length > 1) {
@@ -248,7 +249,7 @@ async function paintHistoryChart(snaps, alloc) {
       note.textContent = `${snapSeries.length} Stichtage · ${dateFull(snapSeries[0].date)} bis ${dateFull(snapSeries[snapSeries.length - 1].date)}`;
     } else {
       box.innerHTML = '';
-      note.textContent = 'Für eine Linie braucht es zwei Punkte. Verbinde die Marktdaten, dann wird der Verlauf aus echten Kursen gezeichnet, oder importiere die CSV ein zweites Mal.';
+      note.textContent = 'Für eine Linie braucht es zwei Punkte. Verbinde die Marktdaten unter „Mehr“, dann wird der Verlauf aus echten Kursen gezeichnet.';
     }
   };
 
@@ -260,7 +261,31 @@ async function paintHistoryChart(snaps, alloc) {
     note.textContent = 'Kurse werden geladen …';
   }
 
-  const res = await market.portfolioHistory(alloc, { range: range === 'max' ? '5y' : range });
+  const txs = store.getState().transactions;
+  const totals = stats.totals(store.latestSnapshot());
+
+  // 1. Wahl: der echte Verlauf aus den Umsätzen.
+  if (txs.length) {
+    const real = await market.historyFromTransactions(txs, alloc, { range: apiRange });
+    if (currentView !== 'overview') return;
+    if (real.ok) {
+      drawSeries(box, note, real.points, {
+        quelle: 'echt',
+        covered: real.covered,
+        total: real.total,
+        unresolved: real.unresolved,
+        heute: totals?.value,
+        investedPoints: real.investedPoints,
+      });
+      return;
+    }
+    if (real.error) {
+      note.textContent = `Umsätze vorhanden, aber der echte Verlauf ging nicht: ${real.error} Es wird hochgerechnet.`;
+    }
+  }
+
+  // 2. Wahl: Hochrechnung aus dem heutigen Bestand.
+  const res = await market.portfolioHistory(alloc, { range: apiRange });
   if (currentView !== 'overview') return;
 
   if (!res.ok || res.points.length < 2) {
@@ -269,13 +294,48 @@ async function paintHistoryChart(snaps, alloc) {
     else if (!res.covered) note.textContent = 'Ordne deinen Positionen Börsensymbole zu, dann entsteht hier der Kursverlauf.';
     return;
   }
+  drawSeries(box, note, res.points, { quelle: 'hochgerechnet', covered: res.covered, total: res.total });
+}
 
-  responsive(box, () => lineChart(box, res.points));
-  const first = res.points[0], last = res.points[res.points.length - 1];
-  const diff = last.value - first.value;
-  note.innerHTML = `${deltaHtml(diff, `${moneySigned(diff)} · ${pct(first.value ? (diff / first.value) * 100 : null, { signed: true })}`)}
-    <span style="color:var(--text-muted)"> seit ${escapeHtml(dateFull(first.date))}. Gerechnet mit deinen heutigen Stückzahlen und den damaligen Kursen${
-      res.covered < res.total ? `, ${res.covered} von ${res.total} Positionen` : ''}. Frühere Käufe und Verkäufe stecken darin nicht.</span>`;
+/** Zeichnet die Reihe und schreibt darunter, woher sie kommt und was sie nicht kann. */
+function drawSeries(box, note, points, { quelle, covered, total, unresolved = [], heute = null, investedPoints = null }) {
+  responsive(box, () => lineChart(box, points));
+  const first = points[0], last = points[points.length - 1];
+  const roh = last.value - first.value;
+
+  // Wer im Zeitraum nachgekauft hat, sieht sonst Einzahlungen als Rendite.
+  let zufluss = 0;
+  if (investedPoints?.length === points.length) {
+    zufluss = investedPoints[investedPoints.length - 1].value - investedPoints[0].value;
+  }
+  const diff = roh - zufluss;
+  const basis = first.value + Math.max(zufluss, 0);
+
+  const teil = covered < total ? `, ${covered} von ${total} Papieren` : '';
+  const herkunft = quelle === 'echt'
+    ? `Echter Verlauf aus deinen Umsätzen${teil}: an jedem Tag der Bestand, der wirklich im Depot lag.`
+    : `Hochgerechnet aus deinen heutigen Stückzahlen und den damaligen Kursen${teil}. Frühere Käufe und Verkäufe stecken darin nicht — importiere deine Umsätze unter „Mehr“ für den echten Verlauf.`;
+
+  // Gegenprobe: trifft der berechnete Schlusswert den ausgewiesenen Depotwert?
+  let probe = '';
+  if (quelle === 'echt' && isNum(heute) && heute > 0) {
+    const abw = Math.abs(last.value - heute) / heute * 100;
+    probe = abw <= 2
+      ? ` Der berechnete Schlusswert trifft deinen Depotauszug auf ${pct(abw)} genau.`
+      : ` Achtung: der berechnete Schlusswert liegt ${pct(abw)} neben dem Depotauszug — vermutlich fehlen ältere Umsätze.`;
+  }
+  const offen = unresolved.length
+    ? ` Ohne Kurs blieben: ${unresolved.slice(0, 3).map((u) => u.name).join(', ')}${unresolved.length > 3 ? ' …' : ''}.`
+    : '';
+
+  const zuflussText = Math.abs(zufluss) > 0.5
+    ? ` Der Depotwert veränderte sich um ${moneySigned(roh)}; darin stecken ${
+        zufluss > 0 ? `${money(zufluss)} Zukäufe` : `${money(-zufluss)} Entnahmen`
+      }, herausgerechnet bleibt die Wertentwicklung oben.`
+    : '';
+
+  note.innerHTML = `${deltaHtml(diff, `${moneySigned(diff)} · ${pct(basis ? (diff / basis) * 100 : null, { signed: true })}`)}
+    <span style="color:var(--text-muted)"> seit ${escapeHtml(dateFull(first.date))}.${escapeHtml(zuflussText)} ${escapeHtml(herkunft)}${escapeHtml(probe)}${escapeHtml(offen)}</span>`;
 }
 
 /* -------------------------------------------------------------- Positionen */
@@ -443,6 +503,7 @@ function renderMore() {
   applyTheme(store.getState().settings.theme || 'auto');
   $('#worker-url').value = market.workerUrl();
   paintMarketStatus();
+  paintTxStatus();
 }
 
 function paintMarketStatus(state) {
@@ -555,6 +616,68 @@ function saveImport() {
     toast(replaced ? `Stichtag ${dateFull(date)} aktualisiert (${count} Positionen).` : `${count} Positionen zum ${dateFull(date)} gespeichert.`);
     goto('overview');
   } catch (err) { toast(err.message); }
+}
+
+/* ----------------------------------------------------------------- Umsätze */
+
+function readTxFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try { handleTxText(decodeBuffer(reader.result)); }
+    catch (err) { console.error(err); toast('Die Datei ließ sich nicht lesen.'); }
+  };
+  reader.onerror = () => toast('Die Datei ließ sich nicht lesen.');
+  reader.readAsArrayBuffer(file);
+}
+
+function handleTxText(text) {
+  if (!text || !text.trim()) { toast('Die Datei ist leer.'); return; }
+  const res = parseTransactionsCsv(text);
+  const box = $('#tx-result');
+
+  if (!res.transactions.length) {
+    box.innerHTML = `<div class="note note--bad"><span class="note__icon" aria-hidden="true">!!</span><span>Keine Umsätze erkannt.${
+      res.warnings.length ? ` ${escapeHtml(res.warnings[0])}` : ''}</span></div>`;
+    return;
+  }
+
+  const n = store.saveTransactions(res.transactions);
+  const first = res.transactions[0].date;
+  const last = res.transactions[res.transactions.length - 1].date;
+  const papiere = new Set(res.transactions.map((t) => t.isin || t.wkn || t.name)).size;
+  const kauf = res.transactions.filter((t) => t.side > 0).length;
+
+  box.innerHTML = `
+    <div class="note note--good"><span class="note__icon" aria-hidden="true">✓</span><span>
+      <strong>${n} Umsätze</strong> gespeichert, ${papiere} ${papiere === 1 ? 'Wertpapier' : 'Wertpapiere'},
+      ${escapeHtml(dateFull(first))} bis ${escapeHtml(dateFull(last))}. ${kauf} Zugänge, ${n - kauf} Abgänge.
+    </span></div>
+    ${res.warnings.map((w) => `<div class="note note--warn"><span class="note__icon" aria-hidden="true">!</span><span>${escapeHtml(w)}</span></div>`).join('')}
+    <div class="tablewrap"><table class="data">
+      <thead><tr><th>Datum</th><th>Art</th><th>Papier</th><th>Stück</th><th>Kurs</th></tr></thead>
+      <tbody>${res.transactions.slice(-8).reverse().map((t) => `<tr>
+        <td>${escapeHtml(dateFull(t.date))}</td>
+        <td>${escapeHtml(t.side > 0 ? 'Zugang' : 'Abgang')}</td>
+        <td>${escapeHtml(t.name)}</td>
+        <td>${escapeHtml(fmtQty(t.qty))}</td>
+        <td>${escapeHtml(fmtPrice(t.price))}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <p class="card__note">Die letzten acht von ${n}. ${market.hasMarket()
+      ? 'Die Wertentwicklung auf der Übersicht rechnet ab jetzt damit.'
+      : 'Sobald die Marktdaten verbunden sind, rechnet die Wertentwicklung damit.'}</p>
+    <div class="actions"><button class="btn btn--sm btn--danger" type="button" id="btn-tx-clear">Umsätze löschen</button></div>`;
+
+  paintTxStatus();
+  toast(`${n} Umsätze gespeichert.`);
+}
+
+function paintTxStatus() {
+  const el = $('#tx-status');
+  const n = store.getState().transactions.length;
+  el.className = `pill ${n ? 'pill--up' : 'pill--flat'}`;
+  el.textContent = n ? `${n} Umsätze` : 'keine';
 }
 
 /* ------------------------------------------------------------ Positionsblatt */
@@ -843,6 +966,27 @@ function wireEvents() {
   ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove('is-over'); }));
   drop.addEventListener('drop', (e) => readFile(e.dataTransfer?.files?.[0]));
   $('#btn-paste').addEventListener('click', () => handleCsvText($('#paste-area').value));
+
+  const txDrop = $('#tx-drop');
+  const txInput = $('#tx-input');
+  txDrop.setAttribute('tabindex', '0');
+  txDrop.setAttribute('role', 'button');
+  txDrop.addEventListener('click', () => txInput.click());
+  txDrop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); txInput.click(); } });
+  txInput.addEventListener('change', (e) => readTxFile(e.target.files[0]));
+  ['dragenter', 'dragover'].forEach((ev) => txDrop.addEventListener(ev, (e) => { e.preventDefault(); txDrop.classList.add('is-over'); }));
+  ['dragleave', 'drop'].forEach((ev) => txDrop.addEventListener(ev, (e) => { e.preventDefault(); txDrop.classList.remove('is-over'); }));
+  txDrop.addEventListener('drop', (e) => readTxFile(e.dataTransfer?.files?.[0]));
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#btn-tx-clear')) return;
+    if (!confirm('Alle gespeicherten Umsätze löschen? Die Wertentwicklung fällt dann auf die Hochrechnung zurück.')) return;
+    store.clearTransactions();
+    $('#tx-result').innerHTML = '';
+    paintTxStatus();
+    toast('Umsätze gelöscht.');
+    render();
+  });
 
   $('#mapping-body').addEventListener('change', (e) => {
     const sel = e.target.closest('[data-mapfield]');

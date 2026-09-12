@@ -39,10 +39,16 @@ der Einstellung des Handys. Der Mond oben rechts schaltet schnell durch.
 * **Depotwert** mit Veränderung seit dem letzten Stichtag, wahlweise um Ein- und
   Auszahlungen bereinigt, damit frisches Geld nicht als Rendite durchgeht.
 * **Gewinn und Verlust** gesamt und je Position, absolut und in Prozent.
-* **Wertentwicklung über die Zeit.** Mit angebundenen Marktdaten wird die Kurve aus
-  echten Kursen gezeichnet und ist ab dem ersten Import da; sie rechnet mit deinen
-  heutigen Stückzahlen, frühere Käufe stecken also nicht darin. Ohne Anbindung
-  entsteht sie aus den Stichtagen und braucht darum zwei Importe.
+* **Wertentwicklung über die Zeit**, in drei Stufen, je nachdem was vorliegt:
+  1. **Echt** — mit importierten Umsätzen wird für jeden Tag der Bestand
+     rekonstruiert, der wirklich im Depot lag, und mit den Kursen von damals
+     bewertet. Zukäufe und Entnahmen werden herausgerechnet, es bleibt die
+     reine Wertentwicklung. Zur Kontrolle wird der berechnete Schlusswert gegen
+     den ausgewiesenen Depotwert gehalten und die Abweichung genannt.
+  2. **Hochgerechnet** — ohne Umsätze, aber mit Marktdaten: heutige Stückzahlen
+     mal damalige Kurse. Steht ab dem ersten Import, bildet frühere Käufe aber
+     nicht ab, und die Karte sagt das auch.
+  3. **Aus Stichtagen** — ohne Marktdaten, braucht zwei Importe.
 * **Aufteilung** nach Position und nach selbst vergebener Anlageklasse.
 * **Charts überall**: in „Heute" je Position mit wählbarem Zeitraum, in „Aktien" und
   im Detailblatt über sechs Monate. Alle lassen sich mit dem Finger abfahren.
@@ -82,6 +88,14 @@ statt auf Verdacht das falsche Papier einzutragen.
 
 Die Tagesrechnung weist immer aus, wie viele Positionen erfasst sind. Was kein
 Symbol hat, fehlt in der Summe und wird auch so benannt.
+
+## Den echten Verlauf bekommen
+
+Der Depotexport kennt nur den heutigen Tag. Für die tatsächliche Historie
+braucht es die Umsätze: bei comdirect unter **Depot → Umsätze** den Zeitraum
+wählen und als CSV exportieren, dann unter **Mehr → Umsätze für den echten
+Verlauf** hineinziehen. Daraus wird der Bestand jedes einzelnen Tages
+rekonstruiert. Auch Papiere, die du längst verkauft hast, zählen dabei mit.
 
 ## Benutzen
 
