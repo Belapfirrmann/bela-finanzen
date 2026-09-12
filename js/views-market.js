@@ -80,6 +80,13 @@ export async function renderToday() {
   const withSymbol = rows.filter((p) => market.symbolOf(p.key));
   const without = rows.filter((p) => !market.symbolOf(p.key));
 
+  // Abweichungen vorab bestimmen, damit die Zeilen synchron gebaut werden können.
+  const mismatches = new Map();
+  await Promise.all(withSymbol.map(async (p) => {
+    const m = await market.priceMismatch(p, res.bySymbol.get(market.symbolOf(p.key)));
+    if (m) mismatches.set(p.key, m);
+  }));
+
   body.innerHTML = `
     ${isNum(t.change) ? `
       <section class="hero">
@@ -96,12 +103,15 @@ export async function renderToday() {
 
     ${withSymbol.length ? `<section class="card glass">
       <div class="card__head"><h2 class="card__title">Deine Werte</h2></div>
-      <div class="rows">${withSymbol.map((p) => quoteRow(p, res.bySymbol.get(market.symbolOf(p.key)))).join('')}</div>
+      <div class="rows">${withSymbol.map((p) => quoteRow(p, res.bySymbol.get(market.symbolOf(p.key)), mismatches.get(p.key))).join('')}</div>
     </section>` : ''}
 
     ${without.length ? `<section class="card glass">
-      <div class="card__head"><h2 class="card__title">Ohne Börsensymbol</h2></div>
-      <p class="card__note">Diese Positionen fehlen in der Tagesrechnung. Tippe darauf und such das passende Symbol.</p>
+      <div class="card__head">
+        <h2 class="card__title">Ohne Börsensymbol</h2>
+        <button class="btn btn--sm btn--primary" type="button" data-autoassign="1">Automatisch zuordnen</button>
+      </div>
+      <p class="card__note">Diese Positionen fehlen in der Tagesrechnung. „Automatisch zuordnen“ sucht sie selbst und prüft jeden Treffer gegen den Kurs aus deiner CSV. Du kannst auch einzeln antippen.</p>
       <div class="rows">${without.map((p) => `
         <button type="button" class="row" data-symbolfor="${escapeHtml(p.key)}">
           <span class="row__main">
@@ -115,7 +125,7 @@ export async function renderToday() {
     ${tableHtml(withSymbol, res.bySymbol)}`;
 }
 
-function quoteRow(p, q) {
+function quoteRow(p, q, mismatch = null) {
   const sym = market.symbolOf(p.key);
   if (!q || q.error) {
     return `<button type="button" class="row" data-symbolfor="${escapeHtml(p.key)}">
@@ -127,7 +137,6 @@ function quoteRow(p, q) {
     </button>`;
   }
   const posChange = isNum(q.change) && isNum(p.qty) ? q.change * p.qty : null;
-  const mismatch = market.priceMismatch(p, q);
   return `<button type="button" class="row" data-poskey="${escapeHtml(p.key)}">
     <span class="row__main">
       <span class="row__name">${escapeHtml(p.name)}</span>
@@ -223,8 +232,12 @@ export async function renderStocks() {
   ]);
 
   const list = $('#stocks-list');
+  const anyMissing = rows.some((p) => !market.symbolOf(p.key));
   list.innerHTML = `
-    <div class="card__head"><h2 class="card__title">Deine Werte</h2></div>
+    <div class="card__head">
+      <h2 class="card__title">Deine Werte</h2>
+      ${anyMissing ? '<button class="btn btn--sm btn--primary" type="button" data-autoassign="1">Automatisch zuordnen</button>' : ''}
+    </div>
     ${res.error ? `<div class="note note--bad"><span class="note__icon" aria-hidden="true">!!</span><span>${escapeHtml(res.error)}</span></div>` : ''}
     <div class="rows">${rows.map((p) => {
       const sym = market.symbolOf(p.key);
@@ -387,6 +400,121 @@ export async function openSymbolPicker(key) {
   });
 
   run();
+}
+
+/* ----------------------------------------------------- Automatische Suche */
+
+export async function runAutoAssign() {
+  const snap = store.latestSnapshot();
+  if (!snap || !market.hasMarket()) return;
+  const rows = stats.allocation(snap);
+
+  const dlg = $('#news-dialog');
+  $('#news-dialog-title').textContent = 'Symbole werden gesucht';
+  const body = $('#news-dialog-body');
+  body.innerHTML = '<p class="card__note">Einen Moment …</p><div class="skeleton" style="height:8px"></div>';
+  dlg.showModal();
+
+  const res = await market.autoAssign(rows, {
+    onProgress: ({ done, total, name }) => {
+      body.innerHTML = `
+        <p class="card__note">${done} von ${total} geprüft${name ? ` · ${escapeHtml(name)}` : ''}</p>
+        <div class="bar__track"><span class="bar__fill" style="width:${total ? (done / total) * 100 : 0}%"></span></div>`;
+    },
+  });
+
+  $('#news-dialog-title').textContent = 'Zuordnung';
+  body.innerHTML = `
+    ${res.assigned.length ? `
+      <div class="note note--good"><span class="note__icon" aria-hidden="true">✓</span><span>${res.assigned.length} ${res.assigned.length === 1 ? 'Position' : 'Positionen'} zugeordnet.</span></div>
+      <div class="rows">${res.assigned.map((a) => `
+        <div class="row row--static">
+          <span class="row__main">
+            <span class="row__name">${escapeHtml(a.position.name)}</span>
+            <span class="row__meta">${escapeHtml(a.name || '')}${isNum(a.dev) ? ` · Kursabweichung ${escapeHtml(pct(a.dev * 100))}` : ''}</span>
+          </span>
+          <span class="row__side"><span class="chip">${escapeHtml(a.symbol)}</span></span>
+        </div>`).join('')}</div>` : ''}
+
+    ${res.unsure.length ? `
+      <div class="note note--warn"><span class="note__icon" aria-hidden="true">!</span><span>${res.unsure.length} ${res.unsure.length === 1 ? 'Position ließ' : 'Positionen ließen'} sich nicht sicher zuordnen. Lieber offen lassen als das falsche Papier eintragen — tippe darauf und wähl von Hand.</span></div>
+      <div class="rows">${res.unsure.map((u) => `
+        <button type="button" class="row" data-symbolfor="${escapeHtml(u.position.key)}">
+          <span class="row__main">
+            <span class="row__name">${escapeHtml(u.position.name)}</span>
+            <span class="row__meta">${escapeHtml(u.reason)}</span>
+          </span>
+          <span class="row__side"><span class="chip">von Hand</span></span>
+        </button>`).join('')}</div>` : ''}
+
+    ${!res.assigned.length && !res.unsure.length ? '<p class="card__note">Es war nichts offen.</p>' : ''}
+    <div class="actions"><button class="btn" type="button" data-close-dialog="news-dialog">Fertig</button></div>`;
+
+  document.dispatchEvent(new CustomEvent('bf:symbols-changed', { detail: { silent: true } }));
+}
+
+/** Ergebnis einer eingefügten Wertpapierliste. */
+export async function runSecurityList(text) {
+  const snap = store.latestSnapshot();
+  if (!snap) { return; }
+  if (!market.hasMarket()) {
+    alert('Für die Symbolsuche muss erst der Marktdaten-Worker verbunden sein.');
+    return;
+  }
+  const rows = stats.allocation(snap);
+
+  const dlg = $('#news-dialog');
+  $('#news-dialog-title').textContent = 'Liste wird eingelesen';
+  const body = $('#news-dialog-body');
+  body.innerHTML = '<p class="card__note">Einen Moment …</p>';
+  dlg.showModal();
+
+  let res;
+  try {
+    res = await market.applySecurityList(text, rows, {
+      onProgress: ({ done, total, name }) => {
+        body.innerHTML = `
+          <p class="card__note">${done} von ${total} geprüft${name ? ` · ${escapeHtml(name)}` : ''}</p>
+          <div class="bar__track"><span class="bar__fill" style="width:${total ? (done / total) * 100 : 0}%"></span></div>`;
+      },
+    });
+  } catch (err) {
+    $('#news-dialog-title').textContent = 'Liste';
+    body.innerHTML = `<div class="note note--bad"><span class="note__icon" aria-hidden="true">!!</span><span>${escapeHtml(err.message)}</span></div>
+      <div class="actions"><button class="btn" type="button" data-close-dialog="news-dialog">Schließen</button></div>`;
+    return;
+  }
+
+  $('#news-dialog-title').textContent = 'Liste übernommen';
+  body.innerHTML = `
+    ${res.applied.length ? `
+      <div class="note note--good"><span class="note__icon" aria-hidden="true">✓</span><span>${res.applied.length} ${res.applied.length === 1 ? 'Wertpapier' : 'Wertpapiere'} zugeordnet.</span></div>
+      <div class="rows">${res.applied.map((a) => `
+        <div class="row row--static">
+          <span class="row__main">
+            <span class="row__name">${escapeHtml(a.position.name)}</span>
+            <span class="row__meta">${escapeHtml([a.entry.isin, a.entry.wkn].filter(Boolean).join(' · ') || a.name || '')}${isNum(a.dev) ? ` · Kursabweichung ${escapeHtml(pct(a.dev * 100))}` : ''}</span>
+          </span>
+          <span class="row__side"><span class="chip">${escapeHtml(a.symbol)}</span></span>
+        </div>`).join('')}</div>` : ''}
+
+    ${res.unsure.length ? `
+      <div class="note note--warn"><span class="note__icon" aria-hidden="true">!</span><span>Bei ${res.unsure.length} ${res.unsure.length === 1 ? 'Papier' : 'Papieren'} passte kein Börsenkurs zum Kurs aus der CSV. ISIN und WKN sind gespeichert, das Symbol wähl bitte selbst.</span></div>
+      <div class="rows">${res.unsure.map((u) => `
+        <button type="button" class="row" data-symbolfor="${escapeHtml(u.position.key)}">
+          <span class="row__main">
+            <span class="row__name">${escapeHtml(u.position.name)}</span>
+            <span class="row__meta">${escapeHtml(u.reason)}</span>
+          </span>
+          <span class="row__side"><span class="chip">von Hand</span></span>
+        </button>`).join('')}</div>` : ''}
+
+    ${res.unmatched.length ? `
+      <div class="note"><span class="note__icon" aria-hidden="true">i</span><span>${res.unmatched.length} ${res.unmatched.length === 1 ? 'Zeile gehörte' : 'Zeilen gehörten'} zu keiner Position in deinem Depot: ${escapeHtml(res.unmatched.map((e) => e.name || e.isin || e.wkn).slice(0, 5).join(', '))}.</span></div>` : ''}
+
+    <div class="actions"><button class="btn" type="button" data-close-dialog="news-dialog">Fertig</button></div>`;
+
+  document.dispatchEvent(new CustomEvent('bf:symbols-changed', { detail: { silent: true } }));
 }
 
 /* ---------------------------------------------- Zusammenfassung Übersicht */

@@ -7,7 +7,8 @@ import * as stats from './stats.js';
 import * as market from './market.js';
 import { lineChart, donut, foldToTop, responsive, sparkline } from './charts.js';
 import {
-  renderToday, renderStocks, renderLiveSummary, openNews, openSymbolPicker, pillHtml, rangeHtml,
+  renderToday, renderStocks, renderLiveSummary, openNews, openSymbolPicker,
+  runAutoAssign, runSecurityList, pillHtml, rangeHtml,
 } from './views-market.js';
 import {
   money, moneySigned, pct, qty as fmtQty, price as fmtPrice, decimal,
@@ -496,6 +497,9 @@ async function openPosition(key) {
     .filter((h) => h.pos).reverse();
   const cls = store.assetClassOf(key);
   const sym = market.symbolOf(key);
+  const meta = store.getState().meta?.[key] || {};
+  const isin = p.isin || meta.isin || null;
+  const wkn = p.wkn || meta.wkn || null;
 
   $('#pos-dialog-title').textContent = p.name;
   $('#pos-dialog-body').innerHTML = `
@@ -515,7 +519,7 @@ async function openPosition(key) {
         <span class="metric__value">${isNum(p.gainAbs) ? `${escapeHtml(moneySigned(p.gainAbs))} ` : '–'}${isNum(p.gainPct) ? deltaHtml(p.gainPct, pct(p.gainPct, { signed: true })) : ''}</span>
       </div>
     </div>
-    <p class="card__note">${[p.wkn ? `WKN ${escapeHtml(p.wkn)}` : '', p.isin ? `ISIN ${escapeHtml(p.isin)}` : '', p.currency ? escapeHtml(p.currency) : ''].filter(Boolean).join(' · ') || 'Keine Kennnummer in der Datei.'}</p>
+    <p class="card__note">${[wkn ? `WKN ${escapeHtml(wkn)}` : '', isin ? `ISIN ${escapeHtml(isin)}` : '', p.currency ? escapeHtml(p.currency) : ''].filter(Boolean).join(' · ') || 'Keine Kennnummer bekannt. Der comdirect-Export liefert keine, du kannst sie unter Mehr als Liste einfügen.'}</p>
     ${p.priceEstimated ? '<div class="note"><span class="note__icon" aria-hidden="true">i</span><span>Der Export enthält keinen aktuellen Kurs. Gerechnet wird mit der Mitte aus Tages-Hoch und Tages-Tief, anteilig auf den ausgewiesenen Depotwert gebracht.</span></div>' : ''}
     <div class="actions">
       <button class="btn btn--sm" type="button" data-symbolfor="${escapeHtml(key)}">${sym ? `Symbol: ${escapeHtml(sym)}` : 'Börsensymbol zuordnen'}</button>
@@ -558,7 +562,7 @@ async function openPosition(key) {
       box.innerHTML = `<div class="note note--warn"><span class="note__icon" aria-hidden="true">!</span><span>${escapeHtml(q?.error || res.error || 'Kein Kurs zu diesem Symbol.')}</span></div>`;
       return;
     }
-    const mismatch = market.priceMismatch(p, q);
+    const mismatch = await market.priceMismatch(p, q);
     box.innerHTML = `
       <div class="metrics">
         <div class="metric">
@@ -616,6 +620,8 @@ function wireEvents() {
     const nav = e.target.closest('[data-goto]');
     if (nav) { goto(nav.dataset.goto); return; }
 
+    if (e.target.closest('[data-autoassign]')) { runAutoAssign(); return; }
+
     const symBtn = e.target.closest('[data-symbolfor]');
     if (symBtn) { document.getElementById('pos-dialog')?.close(); openSymbolPicker(symBtn.dataset.symbolfor); return; }
 
@@ -633,7 +639,10 @@ function wireEvents() {
     }
   });
 
-  document.addEventListener('bf:symbols-changed', () => { toast('Symbol gespeichert.'); render(); });
+  document.addEventListener('bf:symbols-changed', (e) => {
+    if (!e.detail?.silent) toast('Symbol gespeichert.');
+    render();
+  });
 
   $('#range-picker').addEventListener('click', (e) => {
     const b = e.target.closest('[data-range]');
@@ -675,6 +684,12 @@ function wireEvents() {
       paintMarketStatus('err');
       $('#market-hint').innerHTML = `<div class="note note--bad"><span class="note__icon" aria-hidden="true">!!</span><span>${escapeHtml(err.message)}</span></div>`;
     }
+  });
+
+  $('#btn-seclist').addEventListener('click', () => {
+    const text = $('#seclist').value.trim();
+    if (!text) { toast('Erst eine Liste einfügen.'); return; }
+    runSecurityList(text);
   });
 
   // Datei
@@ -738,6 +753,7 @@ function wireEvents() {
     dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
   }
   $('#pos-dialog').addEventListener('close', () => render());
+  $('#news-dialog').addEventListener('close', () => render());
 }
 
 /* --------------------------------------------------------------------- Start */

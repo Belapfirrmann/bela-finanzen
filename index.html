@@ -257,6 +257,15 @@
         <span class="field__hint">Leer lassen, wenn du ohne Live-Kurse arbeiten willst. „Heute“ zeigt dann die Tagesspanne aus deiner CSV.</span>
       </label>
       <div id="market-hint"></div>
+      <details class="details">
+        <summary>Wertpapierliste einfügen (ISIN, WKN oder Symbol)</summary>
+        <label class="field field--block">
+          <span class="field__label">Liste</span>
+          <textarea id="seclist" rows="5" spellcheck="false" placeholder="ISHSVII-CORE S+P500 DLACC | IE00B5BMR087 | A0RPWH"></textarea>
+          <span class="field__hint">Eine Zeile je Wertpapier, getrennt durch senkrechten Strich, Semikolon oder Tabulator. JSON geht auch. Erkannt werden Bezeichnung, ISIN, WKN und, falls dabei, das Börsensymbol. Nützlich, weil der comdirect-Export keine ISIN mitliefert.</span>
+        </label>
+        <button class="btn" type="button" id="btn-seclist">Liste übernehmen</button>
+      </details>
     </section>
 
     <!-- Verlauf -->

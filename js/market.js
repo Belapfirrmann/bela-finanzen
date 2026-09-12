@@ -143,6 +143,223 @@ export async function ping(base) {
   return info;
 }
 
+/* ------------------------------------------------------------ Wechselkurse */
+
+const fxCache = new Map();
+
+/**
+ * Faktor, mit dem ein Kurs in `currency` zu Euro wird.
+ * Yahoo führt Währungspaare als eigenes Symbol, etwa EURUSD=X.
+ */
+export async function fxToEur(currency) {
+  const cur = String(currency || 'EUR').toUpperCase();
+  if (cur === 'EUR') return 1;
+  if (fxCache.has(cur)) return fxCache.get(cur);
+
+  const pair = `EUR${cur}=X`;
+  const res = await quotes([pair]);
+  const q = res.bySymbol.get(pair);
+  // Der Kurs sagt, wie viele Einheiten ein Euro kostet - für die Gegenrichtung invertieren.
+  const factor = q && !q.error && q.price ? 1 / q.price : null;
+  fxCache.set(cur, factor);
+  return factor;
+}
+
+/* ------------------------------------------------------- Automatik-Zuordnung */
+
+// Handelsplätze, an denen die comdirect üblicherweise abrechnet.
+const GERMAN_VENUE = /\.(DE|F|SG|MU|BE|DU|HM|HA|STU)$/i;
+
+/**
+ * Wählt aus Suchtreffern den Kandidaten, dessen Kurs zum Kurs aus der CSV passt.
+ * Ohne diese Schranke würde bei mehreren Handelsplätzen leicht das falsche
+ * Papier landen. Fremdwährungen werden vorher in Euro umgerechnet.
+ */
+export async function pickCandidate(position, candidates) {
+  const quoted = await quotes(candidates.map((c) => c.symbol));
+  let best = null;
+  for (const c of candidates) {
+    const q = quoted.bySymbol.get(c.symbol);
+    if (!q || q.error || q.price == null) continue;
+
+    const eur = await priceInEur(q);
+    if (eur == null) continue;
+
+    const dev = Number.isFinite(position.price) && position.price
+      ? Math.abs(eur - position.price) / position.price
+      : null;
+    if (dev !== null && dev > 0.12) continue;
+
+    let score = dev === null ? 0 : Math.max(0, 60 - dev * 400);
+    if (GERMAN_VENUE.test(c.symbol)) score += 30;
+    if (q.currency === 'EUR') score += 15;
+    if (!best || score > best.score) {
+      best = { symbol: c.symbol, name: c.name, score, dev, quote: q, currency: q.currency };
+    }
+  }
+  return best;
+}
+
+/**
+ * Sucht zu jeder Position ohne Symbol selbst das passende Wertpapier.
+ *
+ * Der Name allein ist kein Beweis - darum wird jeder Kandidat abgefragt und
+ * sein Kurs gegen den Kurs aus der CSV gehalten. Zugeordnet wird nur, was
+ * dicht genug liegt; alles andere bleibt offen und wird zurückgemeldet,
+ * statt auf Verdacht ein falsches Papier einzutragen.
+ */
+export async function autoAssign(positions, { onProgress = () => {} } = {}) {
+  const open = positions.filter((p) => !symbolOf(p.key));
+  const assigned = [], unsure = [];
+
+  for (let i = 0; i < open.length; i++) {
+    const p = open[i];
+    onProgress({ done: i, total: open.length, name: p.name });
+
+    const found = await search(suggestQuery(p.name));
+    const cands = (found.results || []).slice(0, 6);
+    if (!cands.length) { unsure.push({ position: p, reason: 'nichts gefunden', candidates: [] }); continue; }
+
+    const best = await pickCandidate(p, cands);
+
+    if (best) {
+      setSymbol(p.key, best.symbol);
+      assigned.push({ position: p, ...best });
+    } else {
+      unsure.push({ position: p, reason: 'kein Kandidat passte zum Kurs aus der CSV', candidates: cands });
+    }
+  }
+
+  onProgress({ done: open.length, total: open.length, name: null });
+  return { assigned, unsure, skipped: positions.length - open.length };
+}
+
+/* -------------------------------------------------- Wertpapierliste einlesen */
+
+const ISIN_RE = /\b([A-Z]{2}[A-Z0-9]{9}[0-9])\b/;
+const WKN_RE = /\b([A-Z0-9]{6})\b/g;
+
+const slug = (s) => String(s || '')
+  .toLowerCase()
+  .replace(/ä/g, 'a').replace(/ö/g, 'o').replace(/ü/g, 'u').replace(/ß/g, 'ss')
+  .replace(/[^a-z0-9]/g, '');
+
+/**
+ * Liest eine eingefügte Wertpapierliste. Akzeptiert JSON
+ * ([{name, isin, wkn, symbol}, …]) oder eine Zeile je Papier, getrennt durch
+ * |, ; oder Tabulator - notfalls werden ISIN und WKN einfach herausgefischt.
+ */
+export function parseSecurityList(text) {
+  const t = String(text || '').trim();
+  if (!t) return [];
+
+  const clean = (e) => ({
+    name: String(e.name || e.bezeichnung || '').trim(),
+    isin: (String(e.isin || '').trim().toUpperCase().match(ISIN_RE) || [])[1] || null,
+    wkn: String(e.wkn || '').trim().toUpperCase() || null,
+    symbol: String(e.symbol || e.ticker || '').trim().toUpperCase() || null,
+  });
+
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const jsonText = fence ? fence[1].trim() : t;
+  if (/^[[{]/.test(jsonText)) {
+    try {
+      const parsed = JSON.parse(jsonText);
+      const arr = Array.isArray(parsed) ? parsed : (parsed.positionen || parsed.positions || [parsed]);
+      return arr.map(clean).filter((e) => e.name || e.isin || e.wkn);
+    } catch { /* dann eben zeilenweise */ }
+  }
+
+  const out = [];
+  for (const line of jsonText.split(/\r?\n/)) {
+    const row = line.trim();
+    if (!row || /^(bezeichnung|name|position)\b/i.test(row)) continue;
+
+    const cells = row.split(/\s*[|;\t]\s*/).map((c) => c.trim()).filter(Boolean);
+    const upper = row.toUpperCase();
+    const isin = (upper.match(ISIN_RE) || [])[1] || null;
+
+    let wkn = null;
+    for (const m of upper.matchAll(WKN_RE)) {
+      if (isin && isin.includes(m[1])) continue;
+      if (/^[0-9]{6}$/.test(m[1]) || /[0-9]/.test(m[1])) { wkn = m[1]; break; }
+    }
+
+    // Der Name ist die Zelle, die keine Kennung ist - sonst der Zeilenanfang.
+    const name = (cells.find((c) => c !== isin && c !== wkn && !/^[A-Z0-9.]{1,8}$/.test(c)) || cells[0] || '')
+      .replace(ISIN_RE, '').trim();
+    const symbol = cells.find((c) => /^[A-Z][A-Z0-9]{0,5}(\.[A-Z]{1,3})?$/.test(c) && c !== wkn) || null;
+
+    if (name || isin || wkn) out.push(clean({ name, isin, wkn, symbol }));
+  }
+  return out;
+}
+
+/** Ordnet einen Listeneintrag der passenden Depotposition zu. */
+function matchPosition(entry, positions) {
+  if (entry.isin) {
+    const byIsin = positions.find((p) => p.isin && p.isin.toUpperCase() === entry.isin);
+    if (byIsin) return byIsin;
+  }
+  if (entry.wkn) {
+    const byWkn = positions.find((p) => p.wkn && p.wkn.toUpperCase() === entry.wkn);
+    if (byWkn) return byWkn;
+  }
+  const a = slug(entry.name);
+  if (!a) return null;
+  const exact = positions.find((p) => slug(p.name) === a);
+  if (exact) return exact;
+  return positions.find((p) => {
+    const b = slug(p.name);
+    if (!b || Math.min(a.length, b.length) < 6) return false;
+    return a.startsWith(b.slice(0, 10)) || b.startsWith(a.slice(0, 10)) || a.includes(b) || b.includes(a);
+  }) || null;
+}
+
+/**
+ * Spielt eine eingefügte Liste ein: merkt sich ISIN und WKN und bestimmt
+ * daraus das Börsensymbol. Ein mitgeliefertes Symbol wird bevorzugt, aber
+ * genauso gegen den Kurs geprüft wie ein selbst gesuchtes.
+ */
+export async function applySecurityList(text, positions, { onProgress = () => {} } = {}) {
+  const entries = parseSecurityList(text);
+  if (!entries.length) throw new Error('In der Liste war nichts zu erkennen.');
+
+  const applied = [], unsure = [], unmatched = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    onProgress({ done: i, total: entries.length, name: e.name || e.isin });
+
+    const p = matchPosition(e, positions);
+    if (!p) { unmatched.push(e); continue; }
+
+    store.setMeta(p.key, { isin: e.isin || null, wkn: e.wkn || null });
+
+    const candidates = [];
+    if (e.symbol) candidates.push({ symbol: e.symbol, name: e.name || p.name });
+    for (const term of [e.isin, e.wkn, suggestQuery(e.name || p.name)].filter(Boolean)) {
+      const found = await search(term);
+      for (const r of (found.results || []).slice(0, 6)) {
+        if (!candidates.some((c) => c.symbol === r.symbol)) candidates.push(r);
+      }
+      if (candidates.length >= 8) break;
+    }
+    if (!candidates.length) { unsure.push({ position: p, entry: e, reason: 'kein Treffer an der Börse' }); continue; }
+
+    const best = await pickCandidate(p, candidates);
+    if (best) {
+      setSymbol(p.key, best.symbol);
+      applied.push({ position: p, entry: e, ...best });
+    } else {
+      unsure.push({ position: p, entry: e, reason: 'kein Treffer passte zum Kurs aus der CSV' });
+    }
+  }
+
+  onProgress({ done: entries.length, total: entries.length, name: null });
+  return { applied, unsure, unmatched };
+}
+
 /* -------------------------------------------------------------- Auswertung */
 
 /**
@@ -174,10 +391,24 @@ export function todayTotals(positions, bySymbol) {
   };
 }
 
-/** Plausibilitätsprüfung: passt der Börsenkurs zum Kurs aus der CSV? */
-export function priceMismatch(position, quote) {
-  if (!quote || quote.error || quote.price == null || position.price == null) return null;
-  const diff = Math.abs(quote.price - position.price) / position.price;
+/** Börsenkurs in Euro, notfalls über den Wechselkurs. */
+export async function priceInEur(quote) {
+  if (!quote || quote.error || quote.price == null) return null;
+  if (!quote.currency || quote.currency === 'EUR') return quote.price;
+  const factor = await fxToEur(quote.currency);
+  return factor == null ? null : quote.price * factor;
+}
+
+/**
+ * Plausibilitätsprüfung: passt der Börsenkurs zum Kurs aus der CSV?
+ * Gibt die Abweichung in Prozent zurück, sonst null. Bei Fremdwährung wird
+ * erst umgerechnet - sonst wäre jede US-Aktie ein Fehlalarm.
+ */
+export async function priceMismatch(position, quote) {
+  if (!quote || quote.error || position.price == null) return null;
+  const eur = await priceInEur(quote);
+  if (eur == null) return null;
+  const diff = Math.abs(eur - position.price) / position.price;
   return diff > 0.15 ? diff * 100 : null;
 }
 

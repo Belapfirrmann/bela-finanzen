@@ -60,11 +60,21 @@ Schlagzeilen von Google News. Einrichtung und Fehlersuche stehen in
 [`worker/README.md`](worker/README.md); die Adresse trägst du danach unter
 **Mehr → Marktdaten** ein.
 
-Damit ein Wertpapier einen Kurs bekommt, braucht es ein Börsensymbol. Tippe in
-„Heute“ oder „Aktien“ auf die Position, such den Wert (Name oder ISIN) und wähl
-das Symbol aus. Die Zuordnung wird gespeichert und gilt für jeden weiteren
-Import. Weicht der Börsenkurs stark vom Kurs aus deiner CSV ab, warnt die App —
-dann gehört vermutlich ein anderes Symbol dazu.
+### Wie ein Wertpapier zu seinem Kurs kommt
+
+Dafür braucht es ein Börsensymbol. Drei Wege, vom bequemsten zum genauesten:
+
+1. **Automatisch zuordnen** (Knopf in „Heute“ und „Aktien“). Sucht zu jedem
+   Namen die Kandidaten und prüft jeden gegen den Kurs aus deiner CSV.
+2. **Wertpapierliste einfügen** (Mehr → Marktdaten). Eine Zeile je Papier mit
+   ISIN oder WKN, oder JSON. Genauer als die Namenssuche, weil der
+   comdirect-Export keine ISIN mitliefert.
+3. **Von Hand**: Position antippen, suchen, auswählen.
+
+In allen drei Fällen gilt dieselbe Schranke: zugeordnet wird nur, was
+preislich zum Kurs aus deiner CSV passt (Fremdwährungen werden vorher über
+den Wechselkurs umgerechnet). Was nicht passt, bleibt offen und wird benannt,
+statt auf Verdacht das falsche Papier einzutragen.
 
 Die Tagesrechnung weist immer aus, wie viele Positionen erfasst sind. Was kein
 Symbol hat, fehlt in der Summe und wird auch so benannt.
