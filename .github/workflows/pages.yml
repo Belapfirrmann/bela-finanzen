@@ -1,8 +1,9 @@
 name: Deploy auf GitHub Pages
 
+# Läuft auf jedem Push, veröffentlicht aber nur vom Standard-Branch.
+# So funktioniert es weiter, egal wie der Branch später heißt.
 on:
   push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -16,6 +17,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.ref_name == github.event.repository.default_branch
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

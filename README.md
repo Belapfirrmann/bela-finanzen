@@ -58,7 +58,8 @@ ihr Exportformat ändert.
 ## Hosting einrichten
 
 Die Seite ist statisch, ohne Build-Schritt. Der Workflow
-`.github/workflows/pages.yml` veröffentlicht bei jedem Push auf `main`.
+`.github/workflows/pages.yml` veröffentlicht bei jedem Push auf den Standard-Branch -
+unabhängig davon, wie der gerade heißt.
 
 Einmalig in den Repository-Einstellungen: **Settings → Pages → Source: GitHub Actions**.
 
