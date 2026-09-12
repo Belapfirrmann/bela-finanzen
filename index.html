@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bela Finanzen</title>
+<meta name="description" content="Privates Depot-Dashboard. Daten bleiben auf dem Gerät.">
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bela Finanzen">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="./app.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+
+<header class="appbar">
+  <div class="appbar__inner">
+    <div class="brand">
+      <span class="brand__mark" aria-hidden="true"></span>
+      <span class="brand__name">Bela Finanzen</span>
+    </div>
+    <button class="iconbtn" id="btn-theme" type="button" aria-label="Design wechseln" title="Hell / Dunkel">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 0 8.5 8.5A6.8 6.8 0 0 1 12 3.5Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ============ ÜBERSICHT ============ -->
+  <section class="view" id="view-overview" data-view="overview">
+
+    <div class="empty" id="empty-state" hidden>
+      <div class="empty__icon" aria-hidden="true">
+        <svg viewBox="0 0 48 48" width="44" height="44"><path d="M6 34 16 22l8 7 12-17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M30 12h8v8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h1>Noch keine Daten</h1>
+      <p>Lade deinen comdirect-Depotbestand als CSV hoch. Die Datei wird direkt hier im Browser gelesen und bleibt auf diesem Gerät.</p>
+      <button class="btn btn--primary" type="button" data-goto="import">Depot-CSV importieren</button>
+      <p class="empty__hint">comdirect &rsaquo; Depot &rsaquo; Depotübersicht &rsaquo; Export (CSV)</p>
+    </div>
+
+    <div id="overview-content" hidden>
+
+      <section class="hero" aria-labelledby="hero-label">
+        <p class="hero__label" id="hero-label">Depotwert<span class="hero__date" id="hero-date"></span></p>
+        <p class="hero__value" id="hero-value">–</p>
+        <p class="hero__delta"><span class="delta" id="hero-delta"></span><span class="hero__deltalabel" id="hero-delta-label"></span></p>
+      </section>
+
+      <section class="tiles" aria-label="Kennzahlen">
+        <article class="tile">
+          <p class="tile__label">Eingesetztes Kapital</p>
+          <p class="tile__value" id="tile-invested">–</p>
+          <p class="tile__sub" id="tile-invested-sub"></p>
+        </article>
+        <article class="tile">
+          <p class="tile__label">Gewinn / Verlust</p>
+          <p class="tile__value" id="tile-gain">–</p>
+          <p class="tile__sub"><span class="delta" id="tile-gain-pct"></span></p>
+        </article>
+        <article class="tile">
+          <p class="tile__label">Positionen</p>
+          <p class="tile__value" id="tile-count">–</p>
+          <p class="tile__sub" id="tile-count-sub"></p>
+        </article>
+        <article class="tile">
+          <p class="tile__label">Größte Position</p>
+          <p class="tile__value" id="tile-top">–</p>
+          <p class="tile__sub" id="tile-top-sub"></p>
+        </article>
+      </section>
+
+      <section class="card" id="card-history" aria-labelledby="h-history">
+        <div class="card__head">
+          <h2 class="card__title" id="h-history">Wertentwicklung</h2>
+          <div class="seg" role="group" aria-label="Zeitraum" id="range-picker">
+            <button type="button" class="seg__btn" data-range="90">3M</button>
+            <button type="button" class="seg__btn" data-range="365">1J</button>
+            <button type="button" class="seg__btn is-active" data-range="max">Max</button>
+          </div>
+        </div>
+        <div class="chart" id="chart-history"></div>
+        <p class="card__note" id="history-note"></p>
+      </section>
+
+      <section class="card" aria-labelledby="h-alloc">
+        <div class="card__head">
+          <h2 class="card__title" id="h-alloc">Aufteilung</h2>
+          <div class="seg" role="group" aria-label="Aufteilung nach" id="alloc-picker">
+            <button type="button" class="seg__btn is-active" data-alloc="position">Position</button>
+            <button type="button" class="seg__btn" data-alloc="class">Anlageklasse</button>
+          </div>
+        </div>
+        <div id="alloc-body"></div>
+        <p class="card__note" id="alloc-note"></p>
+      </section>
+
+      <section class="card" aria-labelledby="h-movers">
+        <div class="card__head"><h2 class="card__title" id="h-movers">Stärkste Bewegungen</h2></div>
+        <div id="movers-body"></div>
+      </section>
+
+      <section class="card" aria-labelledby="h-risk">
+        <div class="card__head"><h2 class="card__title" id="h-risk">Streuung</h2></div>
+        <div id="risk-body"></div>
+      </section>
+
+    </div>
+  </section>
+
+  <!-- ============ POSITIONEN ============ -->
+  <section class="view" id="view-positions" data-view="positions" hidden>
+    <div class="viewhead">
+      <h1 class="viewhead__title">Positionen</h1>
+      <p class="viewhead__sub" id="positions-sub"></p>
+    </div>
+    <div class="toolbar">
+      <label class="field field--search">
+        <span class="sr-only">Suchen</span>
+        <input type="search" id="pos-search" placeholder="Name, WKN oder ISIN" autocomplete="off">
+      </label>
+      <label class="field">
+        <span class="sr-only">Sortieren nach</span>
+        <select id="pos-sort">
+          <option value="value">Wert</option>
+          <option value="gainAbs">Gewinn (€)</option>
+          <option value="gainPct">Gewinn (%)</option>
+          <option value="name">Name</option>
+        </select>
+      </label>
+    </div>
+    <div id="positions-body"></div>
+  </section>
+
+  <!-- ============ VERLAUF ============ -->
+  <section class="view" id="view-history" data-view="history" hidden>
+    <div class="viewhead">
+      <h1 class="viewhead__title">Verlauf</h1>
+      <p class="viewhead__sub">Jeder CSV-Import legt einen Stichtag an. Je öfter du importierst, desto feiner der Verlauf.</p>
+    </div>
+    <div id="history-body"></div>
+  </section>
+
+  <!-- ============ IMPORT & DATEN ============ -->
+  <section class="view" id="view-import" data-view="import" hidden>
+    <div class="viewhead">
+      <h1 class="viewhead__title">Import</h1>
+      <p class="viewhead__sub">comdirect &rsaquo; Depot &rsaquo; Depotübersicht &rsaquo; Export als CSV. Die Datei wird nur in deinem Browser gelesen.</p>
+    </div>
+
+    <section class="card">
+      <div class="drop" id="drop">
+        <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        <p class="drop__title">CSV-Datei auswählen</p>
+        <p class="drop__sub">oder hierher ziehen</p>
+        <input type="file" id="file-input" accept=".csv,.txt,text/csv,text/plain" class="sr-only">
+      </div>
+      <details class="details">
+        <summary>Datei lässt sich nicht auswählen? Inhalt einfügen</summary>
+        <label class="field field--block">
+          <span class="field__label">CSV-Inhalt einfügen</span>
+          <textarea id="paste-area" rows="6" placeholder="WKN;Bezeichnung;Stück;Einstandskurs;..." spellcheck="false"></textarea>
+        </label>
+        <button class="btn" type="button" id="btn-paste">Eingefügten Text lesen</button>
+      </details>
+    </section>
+
+    <section class="card" id="import-preview" hidden aria-labelledby="h-preview">
+      <div class="card__head"><h2 class="card__title" id="h-preview">Vorschau</h2></div>
+      <div id="preview-status"></div>
+      <div id="mapping-body"></div>
+      <div id="preview-table"></div>
+      <div class="stack">
+        <label class="field field--block">
+          <span class="field__label">Stichtag</span>
+          <input type="date" id="import-date">
+        </label>
+        <label class="field field--block">
+          <span class="field__label">Ein- / Auszahlung seit letztem Stichtag <span class="field__opt">optional</span></span>
+          <input type="text" inputmode="decimal" id="import-flow" placeholder="z. B. 500 für Einzahlung, -200 für Entnahme">
+          <span class="field__hint">Damit rechnet das Dashboard die echte Wertentwicklung aus, statt nur den Zuwachs durch frisches Geld.</span>
+        </label>
+      </div>
+      <div class="actions">
+        <button class="btn btn--primary" type="button" id="btn-save-import">Stichtag speichern</button>
+        <button class="btn btn--ghost" type="button" id="btn-cancel-import">Abbrechen</button>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="h-backup">
+      <div class="card__head"><h2 class="card__title" id="h-backup">Daten &amp; Sicherung</h2></div>
+      <p class="card__note">Alles liegt ausschließlich im Speicher dieses Browsers. Wenn du den Browser-Speicher löschst oder das Gerät wechselst, sind die Daten weg. Sichere sie darum ab und zu als Datei.</p>
+      <div class="actions">
+        <button class="btn" type="button" id="btn-export">Sicherung herunterladen</button>
+        <button class="btn" type="button" id="btn-import-backup">Sicherung einspielen</button>
+        <input type="file" id="backup-input" accept=".json,application/json" class="sr-only">
+      </div>
+      <div class="actions actions--danger">
+        <button class="btn btn--danger" type="button" id="btn-wipe">Alle Daten löschen</button>
+      </div>
+      <p class="card__note" id="storage-note"></p>
+    </section>
+  </section>
+
+</main>
+
+<nav class="tabbar" aria-label="Hauptnavigation">
+  <button type="button" class="tab is-active" data-goto="overview">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 17 9.5 11l4 3.5L20 7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>Übersicht</span>
+  </button>
+  <button type="button" class="tab" data-goto="positions">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+    <span>Positionen</span>
+  </button>
+  <button type="button" class="tab" data-goto="history">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    <span>Verlauf</span>
+  </button>
+  <button type="button" class="tab" data-goto="import">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M12 4v11m0 0-4-4m4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 18h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+    <span>Import</span>
+  </button>
+</nav>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<dialog class="sheet" id="pos-dialog" aria-labelledby="pos-dialog-title">
+  <div class="sheet__inner">
+    <div class="sheet__head">
+      <h2 id="pos-dialog-title" class="sheet__title">Position</h2>
+      <button type="button" class="iconbtn" id="pos-dialog-close" aria-label="Schließen">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div id="pos-dialog-body"></div>
+  </div>
+</dialog>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Bela Finanzen">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a78d6"/>
+      <stop offset="1" stop-color="#1baf7a"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="113" fill="url(#g)"/>
+  <path d="M102 351 210 233 289 294 417 146" fill="none" stroke="#fff" stroke-width="45"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="417" cy="146" r="35" fill="#fff"/>
+</svg>
