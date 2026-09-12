@@ -63,15 +63,21 @@ function persist() {
 const sortByDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
 
 /** Legt einen Stichtag an oder überschreibt den mit gleichem Datum. */
-export function saveSnapshot({ date, positions, flow = null, source = 'csv' }) {
+export function saveSnapshot({ date, positions, flow = null, source = 'csv', reported = null }) {
   const clean = positions.map((p) => ({
     key: p.key, name: p.name, wkn: p.wkn ?? null, isin: p.isin ?? null,
     qty: p.qty ?? null, buyPrice: p.buyPrice ?? null, buyValue: p.buyValue ?? null,
     price: p.price ?? null, value: p.value ?? null,
     gainAbs: p.gainAbs ?? null, gainPct: p.gainPct ?? null,
     currency: p.currency ?? null,
+    high: p.high ?? null, low: p.low ?? null,
+    priceEstimated: p.priceEstimated === true,
   }));
-  const snap = { date, importedAt: new Date().toISOString(), flow, source, positions: clean };
+  // Nur Summen der Bank - niemals Name, Kundennummer oder Depotnummer.
+  const rep = reported && (Number.isFinite(reported.value) || Number.isFinite(reported.invested))
+    ? { value: reported.value ?? null, invested: reported.invested ?? null }
+    : null;
+  const snap = { date, importedAt: new Date().toISOString(), flow, source, reported: rep, positions: clean };
   const replaced = state.snapshots.some((s) => s.date === date);
   state.snapshots = state.snapshots.filter((s) => s.date !== date).concat(snap).sort(sortByDate);
   persist();

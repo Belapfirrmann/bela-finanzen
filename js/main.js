@@ -101,7 +101,7 @@ function renderOverview() {
   // Kacheln
   $('#tile-invested').textContent = isNum(t.invested) ? money(t.invested) : '–';
   $('#tile-invested-sub').textContent = isNum(t.invested)
-    ? (t.partial ? 'nur Positionen mit Einstandskurs' : 'Kaufwert aller Positionen')
+    ? (t.partial ? 'nur Positionen mit Einstandskurs' : 'Kaufwert laut Depotauszug')
     : 'kein Einstandskurs in der Datei';
 
   $('#tile-gain').textContent = isNum(t.gainAbs) ? moneySigned(t.gainAbs) : '–';
@@ -158,6 +158,9 @@ function renderOverview() {
     $('#alloc-note').textContent = alloc.length > 8
       ? `Die 8 größten von ${alloc.length} Positionen. Alle in „Positionen“.`
       : `Alle ${alloc.length} Positionen nach Anteil am Depotwert.`;
+  }
+  if (t.estimated) {
+    $('#alloc-note').textContent += ' Die Aufteilung ist auf wenige Zehntelprozent genau, weil der Export keinen Einzelkurs enthält.';
   }
 
   // Bewegungen
@@ -267,7 +270,10 @@ function renderPositions() {
           </tr>`).join('')}</tbody>
         </table>
       </div>
-      <p class="card__note">Dieselben Zahlen ohne Farbcodierung - zum Nachrechnen und Vorlesen.</p>
+      <p class="card__note">Dieselben Zahlen ohne Farbcodierung, zum Nachrechnen und Vorlesen.${
+        total.estimated
+          ? ' Die Kurse sind die Mitte aus Tages-Hoch und Tages-Tief und so verrechnet, dass die Summe exakt dem ausgewiesenen Depotwert entspricht - einen aktuellen Kurs exportiert die comdirect nicht.'
+          : ''}</p>
     </section>`;
 }
 
@@ -348,7 +354,8 @@ function handleCsvText(text) {
   const res = parseDepotCsv(text);
   pending = {
     header: res.header, dataRows: res.dataRows, mapping: { ...res.mapping },
-    positions: res.positions, date: res.date || todayIso(), warnings: res.warnings,
+    positions: res.positions, footer: res.footer || {},
+    date: res.date || todayIso(), warnings: res.warnings,
   };
   $('#import-date').value = pending.date;
   $('#import-flow').value = '';
@@ -358,20 +365,21 @@ function handleCsvText(text) {
 }
 
 function recompute() {
-  const { positions } = buildPositions(pending.dataRows, pending.mapping);
+  const { positions } = buildPositions(pending.dataRows, pending.mapping, pending.footer);
   pending.positions = positions;
   renderPreview();
 }
 
 function renderPreview() {
-  const { positions, warnings, header, mapping } = pending;
-  const total = positions.reduce((s, p) => s + (p.value || 0), 0);
+  const { positions, warnings, header, mapping, footer } = pending;
   const withBuy = positions.filter((p) => isNum(p.buyValue));
-  const invested = withBuy.reduce((s, p) => s + p.buyValue, 0);
+  const total = isNum(footer?.value) ? footer.value : positions.reduce((s, p) => s + (p.value || 0), 0);
+  const invested = isNum(footer?.invested) ? footer.invested : withBuy.reduce((s, p) => s + p.buyValue, 0);
+  const hasInvested = isNum(footer?.invested) || withBuy.length > 0;
 
   const notes = [];
   if (positions.length) {
-    notes.push(`<div class="note note--good"><span class="note__icon" aria-hidden="true">✓</span><span><strong>${positions.length} Positionen</strong> erkannt, Depotwert ${escapeHtml(money(total))}${withBuy.length ? ` · Einstand ${escapeHtml(money(invested))}` : ''}.</span></div>`);
+    notes.push(`<div class="note note--good"><span class="note__icon" aria-hidden="true">✓</span><span><strong>${positions.length} Positionen</strong> erkannt, Depotwert ${escapeHtml(money(total))}${hasInvested ? ` · Kaufwert ${escapeHtml(money(invested))} · ${escapeHtml(moneySigned(total - invested))}` : ''}.${isNum(footer?.value) ? ' Die Summen kommen direkt aus der Datei.' : ''}</span></div>`);
   } else {
     notes.push('<div class="note note--bad"><span class="note__icon" aria-hidden="true">!!</span><span>Keine Positionen erkannt. Ordne die Spalten unten von Hand zu.</span></div>');
   }
@@ -422,7 +430,10 @@ function saveImport() {
   if (flowRaw && flow === null) { toast('Die Ein-/Auszahlung ist keine gültige Zahl.'); return; }
 
   try {
-    const { replaced, count } = store.saveSnapshot({ date, positions: pending.positions, flow });
+    const { replaced, count } = store.saveSnapshot({
+      date, positions: pending.positions, flow,
+      reported: { value: pending.footer?.value, invested: pending.footer?.invested },
+    });
     pending = null;
     $('#import-preview').hidden = true;
     $('#file-input').value = '';
@@ -466,7 +477,8 @@ function openPosition(key) {
         ['Anteil am Depot', pct(p.share)],
         ['Stück / Nominal', fmtQty(p.qty)],
         ['Einstandskurs', fmtPrice(p.buyPrice)],
-        ['Aktueller Kurs', fmtPrice(p.price)],
+        [p.priceEstimated ? 'Kurs (geschätzt)' : 'Aktueller Kurs', fmtPrice(p.price)],
+        ...(isNum(p.high) || isNum(p.low) ? [['Tagesspanne', `${fmtPrice(p.low)} – ${fmtPrice(p.high)}`]] : []),
         ['Einstandswert', isNum(p.buyValue) ? money(p.buyValue) : '–'],
       ].map(([l, v]) => `<div class="metric"><span class="metric__label">${l}</span><span class="metric__value">${escapeHtml(v)}</span></div>`).join('')}
       <div class="metric">
@@ -475,6 +487,7 @@ function openPosition(key) {
       </div>
     </div>
     <p class="card__note">${[p.wkn ? `WKN ${escapeHtml(p.wkn)}` : '', p.isin ? `ISIN ${escapeHtml(p.isin)}` : '', p.currency ? escapeHtml(p.currency) : ''].filter(Boolean).join(' · ') || 'Keine Kennnummer in der Datei.'}</p>
+    ${p.priceEstimated ? '<div class="note"><span class="note__icon" aria-hidden="true">i</span><span>Der Export enthält keinen aktuellen Kurs. Gerechnet wird mit der Mitte aus Tages-Hoch und Tages-Tief, anteilig auf den ausgewiesenen Depotwert gebracht.</span></div>' : ''}
     <label class="field field--block">
       <span class="field__label">Anlageklasse</span>
       <select id="pos-class">

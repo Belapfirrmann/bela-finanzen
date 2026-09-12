@@ -50,6 +50,28 @@ und die üblichen comdirect-Spaltennamen selbst. Passt etwas nicht, lässt sich 
 Spalte von Hand zuordnen - es muss also kein Code angefasst werden, wenn die comdirect
 ihr Exportformat ändert.
 
+### Warum manche Zahlen geschätzt sind
+
+Die Depotübersicht der comdirect exportiert **keinen aktuellen Kurs**, nur Tages-Hoch
+und Tages-Tief je Position. Daraus folgt:
+
+* **Exakt** sind Depotwert, Kaufwert und der Gewinn insgesamt. Die stehen als Summen
+  im Fuß der Datei und werden von dort übernommen, nicht selbst addiert.
+* **Exakt** ist auch der Einstandswert je Position: Stückzahl mal Kaufkurs ergibt
+  auf den Cent genau den ausgewiesenen Kaufwert.
+* **Geschätzt** ist der aktuelle Wert je Position. Gerechnet wird mit der Mitte aus
+  Tages-Hoch und Tages-Tief; die Summe dieser Schätzungen wird anschließend anteilig
+  auf den ausgewiesenen Depotwert gezogen. Die Gesamtsumme stimmt dadurch exakt, die
+  Aufteilung auf die einzelnen Positionen liegt im Bereich weniger Zehntelprozent.
+
+Enthält ein Export doch eine Kursspalte, wird sie verwendet und nichts geschätzt.
+
+### Was nicht gespeichert wird
+
+Der Export enthält unten auch Inhabername und Kundennummer. Die Positionstabelle endet
+an der ersten Leerzeile, alles danach wird nur nach Summen und Stichtag durchsucht.
+Name, Kundennummer und Depotnummer landen nirgends in den gespeicherten Daten.
+
 ### Zum Startbildschirm hinzufügen
 
 * **iPhone:** Link in Safari öffnen → Teilen → *Zum Home-Bildschirm*.

@@ -5,16 +5,29 @@ import { daysBetween } from './format.js';
 const sum = (arr, f) => arr.reduce((s, x) => s + (f(x) || 0), 0);
 
 /** Summenwerte eines Stichtags. */
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/** Depotwert eines Stichtags - die Summe der Bank schlägt die eigene Addition. */
+export const snapValue = (snap) =>
+  num(snap?.reported?.value) ?? sum(snap?.positions ?? [], (p) => p.value);
+
 export function totals(snap) {
   if (!snap) return null;
   const ps = snap.positions;
-  const value = sum(ps, (p) => p.value);
-  const withBuy = ps.filter((p) => typeof p.buyValue === 'number');
-  const invested = withBuy.length ? sum(withBuy, (p) => p.buyValue) : null;
-  const valueOfWithBuy = sum(withBuy, (p) => p.value);
-  const gainAbs = invested === null ? null : valueOfWithBuy - invested;
+  const rep = snap.reported || {};
+
+  // Die von der Bank ausgewiesenen Summen haben Vorrang vor der eigenen Addition.
+  const value = num(rep.value) ?? sum(ps, (p) => p.value);
+  const withBuy = ps.filter((p) => num(p.buyValue) !== null);
+  const invested = num(rep.invested) ?? (withBuy.length ? sum(withBuy, (p) => p.buyValue) : null);
+
+  const partial = num(rep.invested) === null && withBuy.length > 0 && withBuy.length < ps.length;
+  // Bei unvollständigem Einstand nur die vergleichbaren Positionen gegenrechnen.
+  const base = partial ? sum(withBuy, (p) => p.value) : value;
+  const gainAbs = invested === null ? null : base - invested;
   const gainPct = invested ? (gainAbs / invested) * 100 : null;
-  const rated = ps.filter((p) => typeof p.gainAbs === 'number');
+
+  const rated = ps.filter((p) => num(p.gainAbs) !== null);
   return {
     value,
     invested,
@@ -24,7 +37,9 @@ export function totals(snap) {
     winners: rated.filter((p) => p.gainAbs > 0).length,
     losers: rated.filter((p) => p.gainAbs < 0).length,
     rated: rated.length,
-    partial: withBuy.length > 0 && withBuy.length < ps.length,
+    partial,
+    estimated: ps.some((p) => p.priceEstimated),
+    fromBank: num(rep.value) !== null,
   };
 }
 
@@ -74,8 +89,8 @@ export function concentration(snap) {
  */
 export function changeBetween(prev, curr) {
   if (!prev || !curr) return null;
-  const a = sum(prev.positions, (p) => p.value);
-  const b = sum(curr.positions, (p) => p.value);
+  const a = snapValue(prev);
+  const b = snapValue(curr);
   const flow = typeof curr.flow === 'number' ? curr.flow : 0;
   const abs = b - a;
   const adjustedAbs = abs - flow;
@@ -96,7 +111,7 @@ export function changeBetween(prev, curr) {
 export function valueSeries(snapshots, range = 'max') {
   const pts = snapshots.map((s) => ({
     date: s.date,
-    value: sum(s.positions, (p) => p.value),
+    value: snapValue(s),
     flow: typeof s.flow === 'number' ? s.flow : 0,
   }));
   if (range === 'max' || pts.length < 2) return pts;

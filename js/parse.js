@@ -124,6 +124,8 @@ export const FIELDS = [
   { key: 'value',     label: 'Wert',           aliases: ['wertineur', 'wertineuro', 'aktuellerwert', 'kurswert', 'gesamtwert', 'bestandswert', 'depotwert', 'marktwert', 'wert', 'wertpapierwert'] },
   { key: 'gainAbs',   label: 'Gewinn / Verlust', aliases: ['entwicklungabsolut', 'gewinnverlust', 'gewinnverlustabsolut', 'guv', 'guvabsolut', 'veranderungabsolut', 'entwicklung', 'veranderung', 'differenz'] },
   { key: 'gainPct',   label: 'Entwicklung %',  aliases: ['entwicklungin%', 'entwicklung%', 'gewinnverlustin%', 'guv%', 'veranderungin%', 'veranderung%', 'rendite', 'performance', 'prozent', '%'] },
+  { key: 'high',      label: 'Tages-Hoch',     aliases: ['tageshoch', 'tageshochstkurs', 'hochstkurs', 'hoch'] },
+  { key: 'low',       label: 'Tages-Tief',     aliases: ['tagestief', 'tiefstkurs', 'tief'] },
   { key: 'currency',  label: 'Währung',        aliases: ['wahrung', 'currency', 'whrg'] },
 ];
 
@@ -195,22 +197,66 @@ export function autoMap(headerRow, dataRows) {
   return mapping;
 }
 
+/* ------------------------------------------------------ Summenblock am Ende */
+
+const FOOTER_KEYS = [
+  ['value', ['depotwert', 'bestandswert', 'gesamtwert', 'marktwert', 'depotgesamtwert']],
+  ['invested', ['kaufwert', 'einstandswert', 'anschaffungswert']],
+  ['change', ['veranderung', 'entwicklung', 'gewinnverlust']],
+  ['collateral', ['beleihungswert']],
+];
+
+/**
+ * Liest den Summenblock unter der Positionstabelle.
+ * Die comdirect schreibt dort Zeilen wie: "Depotwert";"EUR";"8.570,16"
+ */
+export function parseFooter(rows) {
+  const out = {};
+  for (const row of rows) {
+    const label = norm(row[0]);
+    if (!label) continue;
+    for (const [key, aliases] of FOOTER_KEYS) {
+      if (out[key] !== undefined) continue;
+      if (!aliases.some((a) => label === a || label.startsWith(a))) continue;
+      // Der Betrag steht in der ersten Zelle rechts davon, die eine Zahl ist.
+      for (let i = 1; i < row.length; i++) {
+        const n = parseNumber(row[i]);
+        if (n !== null) { out[key] = n; break; }
+      }
+    }
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------ Stichtag suchen */
 
 const SKIP_NAME = /^(summe|zwischensumme|gesamt|gesamtsumme|saldo|depotwert|bestand|total|ubertrag|übertrag)\b/i;
 
-/** "Stand: 12.09.2026" o. ä. aus dem Dateikopf. */
-export function findStatementDate(rows, headerIdx) {
-  const end = headerIdx > -1 ? headerIdx : Math.min(rows.length, 20);
-  for (let i = 0; i < end; i++) {
-    for (const cell of rows[i]) {
-      const m = String(cell).match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
-      if (m) {
-        const [, d, mo, y] = m;
-        return `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
-      }
-      const iso = String(cell).match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
-      if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+const toIso = (cell) => {
+  const m = String(cell).match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  const iso = String(cell).match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  return iso ? `${iso[1]}-${iso[2]}-${iso[3]}` : null;
+};
+
+/**
+ * Sucht den Stichtag in der ganzen Datei - die comdirect schreibt ihn in der
+ * Depotübersicht ganz ans Ende ("Datum: ";"12.09.2026";"12:29").
+ */
+export function findStatementDate(rows) {
+  // Erst eine ausdrücklich als Datum beschriftete Zeile.
+  for (const row of rows) {
+    if (!/^datum/.test(norm(row[0]))) continue;
+    for (const cell of row.slice(1)) {
+      const iso = toIso(cell);
+      if (iso) return iso;
+    }
+  }
+  // Sonst das erste Datum überhaupt.
+  for (const row of rows) {
+    for (const cell of row) {
+      const iso = toIso(cell);
+      if (iso) return iso;
     }
   }
   return null;
@@ -218,8 +264,40 @@ export function findStatementDate(rows, headerIdx) {
 
 /* ------------------------------------------------------------- Positionsbau */
 
+/**
+ * Zieht geschätzte Positionswerte auf den ausgewiesenen Depotwert zurecht.
+ * Positionen mit echtem Kurs bleiben unangetastet, die Differenz verteilt sich
+ * anteilig auf die geschätzten - so stimmt die Summe exakt mit der comdirect.
+ */
+export function reconcile(positions, footer) {
+  const target = footer?.value;
+  if (!Number.isFinite(target) || target <= 0) return positions;
+
+  const estimated = positions.filter((p) => p.priceEstimated && Number.isFinite(p.value));
+  if (!estimated.length) return positions;
+
+  const fixedSum = positions
+    .filter((p) => !p.priceEstimated)
+    .reduce((s, p) => s + (p.value || 0), 0);
+  const estSum = estimated.reduce((s, p) => s + p.value, 0);
+  if (estSum <= 0) return positions;
+
+  const factor = (target - fixedSum) / estSum;
+  // Ein Faktor weit weg von 1 heißt: die Zuordnung passt nicht. Dann lieber nichts anfassen.
+  if (!Number.isFinite(factor) || factor <= 0 || Math.abs(factor - 1) > 0.25) return positions;
+
+  return positions.map((p) => {
+    if (!p.priceEstimated || !Number.isFinite(p.value)) return p;
+    const value = p.value * factor;
+    const price = p.qty ? value / p.qty : p.price;
+    const gainAbs = Number.isFinite(p.buyValue) ? value - p.buyValue : p.gainAbs;
+    const gainPct = Number.isFinite(gainAbs) && p.buyValue ? (gainAbs / p.buyValue) * 100 : p.gainPct;
+    return { ...p, value, price, gainAbs, gainPct, reconciled: factor !== 1 };
+  });
+}
+
 /** Wendet eine Spaltenzuordnung auf die Datenzeilen an. */
-export function buildPositions(dataRows, mapping) {
+export function buildPositions(dataRows, mapping, footer = null) {
   const get = (row, key) => {
     const idx = mapping[key];
     return idx === undefined || idx === null || idx < 0 ? '' : (row[idx] ?? '');
@@ -239,6 +317,16 @@ export function buildPositions(dataRows, mapping) {
     let buyValue = parseNumber(get(row, 'buyValue'));
     let price = parseNumber(get(row, 'price'));
     let value = parseNumber(get(row, 'value'));
+    const high = parseNumber(get(row, 'high'));
+    const low = parseNumber(get(row, 'low'));
+
+    // Die Depotübersicht der comdirect enthält keinen aktuellen Kurs, nur die
+    // Tagesspanne. Deren Mitte ist die beste verfügbare Näherung.
+    let priceEstimated = false;
+    if (price == null && (high != null || low != null)) {
+      price = high != null && low != null ? (high + low) / 2 : (high ?? low);
+      priceEstimated = true;
+    }
     let gainAbs = parseNumber(get(row, 'gainAbs'));
     let gainPct = parseNumber(get(row, 'gainPct'));
     const currency = String(get(row, 'currency') || '').trim().toUpperCase() || null;
@@ -280,9 +368,10 @@ export function buildPositions(dataRows, mapping) {
       wkn: wkn || null,
       isin: isin || null,
       qty, buyPrice, buyValue, price, value, gainAbs, gainPct, currency,
+      high, low, priceEstimated: priceEstimated && value != null,
     });
   }
-  return { positions, skipped };
+  return { positions: reconcile(positions, footer), skipped };
 }
 
 /* ------------------------------------------------------------------ Gesamtlauf */
@@ -294,30 +383,48 @@ export function buildPositions(dataRows, mapping) {
 export function parseDepotCsv(text) {
   const warnings = [];
   const delimiter = detectDelimiter(text);
-  const allRows = splitCsv(text, delimiter);
-  const rows = allRows.filter((r, i) => r.some((c) => c !== '') || i === 0);
+  // Leerzeilen bleiben stehen: Sie trennen Positionstabelle und Summenblock.
+  const rows = splitCsv(text, delimiter);
+  const isBlank = (r) => !r.some((c) => c !== '');
 
   const headerIdx = findHeaderRow(rows);
   if (headerIdx === -1) {
     return {
-      ok: false, delimiter, rows, headerIdx: -1, header: [], dataRows: [],
-      mapping: {}, positions: [], date: null,
+      ok: false, delimiter, rows, headerIdx: -1, header: [], dataRows: [], footerRows: [],
+      mapping: {}, positions: [], footer: {}, date: findStatementDate(rows),
       warnings: ['Es war keine Kopfzeile mit bekannten Spaltennamen zu finden. Ordne die Spalten unten von Hand zu.'],
     };
   }
 
   const header = rows[headerIdx];
   const width = header.length;
-  const dataRows = rows.slice(headerIdx + 1).filter((r) => r.some((c) => c !== '') && r.length >= Math.min(3, width));
 
+  // Die Tabelle endet bei der ersten Leerzeile. Alles danach ist Summenblock
+  // und Briefkopf - dort stehen auch Name und Kundennummer, die nichts in den
+  // gespeicherten Daten zu suchen haben.
+  let end = headerIdx + 1;
+  while (end < rows.length && !isBlank(rows[end])) end++;
+
+  const dataRows = rows.slice(headerIdx + 1, end)
+    .filter((r) => !isBlank(r) && r.length >= Math.min(3, width));
+  const footerRows = rows.slice(end).filter((r) => !isBlank(r));
+
+  const footer = parseFooter(footerRows);
   const mapping = autoMap(header, dataRows);
-  const { positions, skipped } = buildPositions(dataRows, mapping);
+  const { positions, skipped } = buildPositions(dataRows, mapping, footer);
 
   if (mapping.value === undefined && mapping.qty === undefined) {
     warnings.push('Weder eine Wert- noch eine Stückzahl-Spalte erkannt. Bitte unten von Hand zuordnen.');
   }
   if (mapping.buyPrice === undefined && mapping.buyValue === undefined) {
-    warnings.push('Kein Einstandskurs erkannt - Gewinn und Verlust lassen sich dann nicht berechnen.');
+    warnings.push('Kein Einstandskurs erkannt, Gewinn und Verlust lassen sich dann nicht berechnen.');
+  }
+  if (positions.some((p) => p.priceEstimated)) {
+    warnings.push(
+      Number.isFinite(footer.value)
+        ? 'Die Datei enthält keinen aktuellen Kurs, nur Tages-Hoch und Tages-Tief. Die Werte je Position sind daraus geschätzt und auf den ausgewiesenen Depotwert normiert. Die Gesamtsummen stimmen dadurch exakt, die Aufteilung auf die einzelnen Positionen ist auf wenige Zehntelprozent genau.'
+        : 'Die Datei enthält keinen aktuellen Kurs, nur Tages-Hoch und Tages-Tief. Die Werte je Position sind daraus geschätzt.'
+    );
   }
   if (skipped.length) {
     const n = skipped.length;
@@ -330,8 +437,8 @@ export function parseDepotCsv(text) {
 
   return {
     ok: positions.length > 0,
-    delimiter, rows, headerIdx, header, dataRows, mapping, positions,
-    date: findStatementDate(rows, headerIdx),
+    delimiter, rows, headerIdx, header, dataRows, footerRows, mapping, positions, footer,
+    date: findStatementDate(rows),
     warnings,
   };
 }
